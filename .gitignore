@@ -1,0 +1,24 @@
+# .gitignore
+
+# 1. 密钥和配置
+.env
+airflow.cfg
+unittests.cfg
+
+# 2. Python 垃圾文件
+__pycache__/
+*.py[cod]
+venv/
+.pytest_cache/
+
+# 3. Docker 挂载的数据目录
+pg_data/
+mysql_data/
+mysql_ngen_data/
+logs/
+data/
+incoming_files/*.csv
+
+# 4. IDE 配置
+.vscode/
+.idea/

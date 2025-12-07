@@ -1,0 +1,42 @@
+Usage: airflow [-h] GROUP_OR_COMMAND ...
+
+Positional Arguments:
+  GROUP_OR_COMMAND
+
+    Groups
+      assets           Manage assets
+      backfill         Manage backfills
+      config           View configuration
+      connections      Manage connections
+      dags             Manage DAGs
+      db               Database operations
+      db-manager       Manage externally connected database managers
+      fab-db           Manage FAB
+      jobs             Manage jobs
+      pools            Manage pools
+      providers        Display providers
+      roles            Manage roles
+      tasks            Manage tasks
+      users            Manage users
+      variables        Manage variables
+
+    Commands:
+      api-server       Start an Airflow API server instance
+      cheat-sheet      Display cheat sheet
+      dag-processor    Start a dag processor instance
+      info             Show information about current Airflow and environment
+      kerberos         Start a kerberos ticket renewer
+      permissions-cleanup
+                       Clean up DAG permissions in Flask-AppBuilder tables
+      plugins          Dump information about loaded plugins
+      rotate-fernet-key
+                       Rotate encrypted connection credentials and variables
+      scheduler        Start a scheduler instance
+      standalone       Run an all-in-one copy of Airflow
+      sync-perm        Update permissions for existing roles and optionally
+                       DAGs
+      triggerer        Start a triggerer instance
+      version          Show the version
+
+Options:
+  -h, --help           show this help message and exit

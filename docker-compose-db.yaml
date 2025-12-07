@@ -1,0 +1,16 @@
+# docker-compose-db.yaml (只用来跑模拟数据库)
+version: '3'
+services:
+  # 模拟 自采数据库
+  mysql_box:
+    image: mysql:8.0
+    container_name: cactus_db_container
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: kpi_data_db
+    ports:
+      - "3308:3306"
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+    restart: always
