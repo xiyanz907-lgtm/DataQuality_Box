@@ -25,7 +25,7 @@ class CompletenessChecks:
         # 计算丢失率 (保留4位小数)
         loss_rate = round(missing_count / total_rows, 4) if total_rows > 0 else 0.0
         
-        # 判定标准：比如丢失率必须 < 1% (这里写死或者后续做成参数)
+        # 判定标准：比如丢失率必须 < 1% (后续考虑做成参数)
         is_passed = loss_rate < 0.01 
 
         return {
@@ -34,6 +34,6 @@ class CompletenessChecks:
             "total_target_rows": total_rows,
             "missing_count": missing_count,
             "loss_rate": loss_rate,
-            # 打印前 5 个丢失的 ID，方便排查
+            # 打印前 5 个丢失的 ID
             "missing_samples": missing_df.select([target_key]).head(5).to_dicts()
         }

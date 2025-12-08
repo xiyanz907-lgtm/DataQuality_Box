@@ -14,7 +14,7 @@ plugins_dir = os.path.join(project_root, "plugins")
 if plugins_dir not in sys.path:
     sys.path.append(plugins_dir)
 
-from services.logic_runner import run_logic_check
+from services.logic_runner import LogicRunner
 
 default_args = {
     "owner": "box_admin",
@@ -25,11 +25,13 @@ default_args = {
 def _run_aqct_check(**context):
     # 调用核心逻辑
     target_date = context["dag_run"].conf.get("date_filter", context["ds"])
-    result = run_logic_check(
-        cactus_conn_id="cactus_mysql_conn",  # 连 kpi_data_db
-        ngen_conn_id="ngen_mysql_conn",  # 连 ngen
-        ngen_table_name="ngen",
-        date_filter=target_date,
+    runner = LogicRunner(
+        cactus_conn_id="cactus_mysql_conn",
+        ngen_conn_id="ngen_mysql_conn"
+    )
+    result = runner.run_checks(
+        table_name='cnt_cycles',
+        date_filter=target_date
     )
 
     print(f"Check Result: {result}")
@@ -38,7 +40,7 @@ def _run_aqct_check(**context):
     context["ti"].xcom_push(key="qa_result", value=result)
 
     if result["status"] == "FAILED":
-        raise ValueError(f"Time Mismatch! Found {result['violation_count']} errors.")
+        raise ValueError(f"FOUND {result['violations_count']}errors.")
 
     return result
 

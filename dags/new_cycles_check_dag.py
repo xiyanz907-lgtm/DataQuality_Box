@@ -14,7 +14,7 @@ plugins_dir = os.path.join(project_root, "plugins")
 if plugins_dir not in sys.path:
     sys.path.append(plugins_dir)
 
-from services.logic_runner import run_logic_check
+from services.logic_runner import LogicRunner
 
 default_args = {
     "owner": "box_admin",
@@ -27,7 +27,7 @@ def _run_new_check(**context):
     target_date = context['params'].get('date_filter')
         
     print(f"FINAL TARGET DATE: {target_date}")    
-    result = run_logic_check(
+    result = LogicRunner(
         cactus_conn_id='cactus_mysql_conn', 
         ngen_conn_id='ngen_mysql_conn', # 占位符，虽然没用到
         ngen_table_name='None',         # 占位符

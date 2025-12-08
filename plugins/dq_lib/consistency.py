@@ -123,3 +123,36 @@ class ConsistencyChecks:
             "failed": failed_count,
             "failed_samples": violation_count.select(select_cols).head(10).to_dicts()
         }
+    
+    @staticmethod
+    def check_field_equality(df_left, df_right, left_key, right_key, left_col, right_col):
+        """
+        通用：双表字段值一致性检查 (如：箱号对箱号)
+        """
+        # 1. Join
+        joined = df_left.join(
+            df_right, left_on=left_key, right_on=right_key, how="inner", suffix="_right"
+        )
+        
+        total_matched = joined.height
+        if total_matched == 0:
+            return {"type": f"consistency_{left_col}", "passed": True, "failed": 0}
+
+        # 2. 对比 (处理 Null 值，假设 Null != "A")
+        # 只有当两个值完全相等时才算 Pass
+        violations = joined.filter(
+            pl.col(left_col) != pl.col(right_col)
+        )
+        
+        failed_count = violations.height
+        passed_count = total_matched - failed_count
+
+        return {
+            "type": f"consistency_{left_col}_vs_{right_col}", # 检查类型名称
+            "total_matched": total_matched,
+            "passed": failed_count == 0,
+            "passed_count": passed_count,
+            "failed": failed_count,
+            # 打印异常样本: ID, 左表值, 右表值
+            "failed_samples": violations.select([left_key, left_col, right_col]).head(5).to_dicts()
+        }
