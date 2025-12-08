@@ -106,8 +106,9 @@ class LogicRunner:
         # =========================================================
         else:
             logger.info("单表模式: 仅拉取自采数据...")
-            # 假设按 _time_begin 过滤日期
-            sql_kpi = f"SELECT * FROM kpi_data_db.{table_name} WHERE DATE(_time_begin) = '{date_filter}'"
+            # 兼容不同表的日期字段，默认 _time_begin，允许在 CONFIG 中通过 date_filter_column 覆盖
+            date_col = config.get("date_filter_column", "_time_begin")
+            sql_kpi = f"SELECT * FROM kpi_data_db.{table_name} WHERE DATE({date_col}) = '{date_filter}'"
             df_self = pl.from_pandas(self.hook_kpi.get_pandas_df(sql_kpi))
             # 可以在这里补充单表的时间清洗逻辑...
 
@@ -127,13 +128,21 @@ class LogicRunner:
         failed_count = sum([1 for r in report_list if not r.get('passed', True)])
         final_status = "FAILED" if failed_count > 0 else "SUCCESS"
         
-        # 生成报告文本
+        # 生成报告文本（通过场景也打印关键统计信息）
         report_str = f"检测表: {table_name}\n日期: {date_filter}\n状态: {final_status}\n\n"
         for r in report_list:
             status_icon = "✅" if r.get('passed') else "❌"
             report_str += f"{status_icon} [{r.get('type', 'Check')}]\n"
+
+            # 若规则返回统计信息（均值/标准差/上下界），通过时也打印
+            stats_keys = ["mean", "std_dev", "upper_limit", "lower_limit", "total_samples", "outlier_count", "outlier_ratio"]
+            stats_items = {k: r[k] for k in stats_keys if k in r}
+            if stats_items:
+                report_str += f"   统计: {stats_items}\n"
+
             if not r.get('passed'):
-                report_str += f"   详情: {r}\n" # 这里会打印出 failed_samples
+                report_str += f"   详情: {r}\n"  # 打印失败样本等
+
             report_str += "-" * 20 + "\n"
 
         return {

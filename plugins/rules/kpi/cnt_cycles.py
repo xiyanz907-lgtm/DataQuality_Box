@@ -76,12 +76,24 @@ def get_logic_rules(df_self, df_ref=None):
     # --- 场景 B: 单表逻辑  ---
     # 3-Sigma 异常检测
     if df_self is not None and df_self.height > 0:
-        # 计算作业时长
-        df_calc = df_self.with_columns(
+        # 计算作业时长（确保时间字段为 datetime）
+        try:
+            df_typed = df_self.with_columns(
+                pl.col('_time_end').cast(pl.String).str.slice(0, 19).str.to_datetime(strict=False),
+                pl.col('_time_begin').cast(pl.String).str.slice(0, 19).str.to_datetime(strict=False),
+            )
+        except Exception as e:
+            results.append({
+                "type": "distribution_3sigma_duration_sec",
+                "passed": False,
+                "msg": f"时间字段解析失败: {e}"
+            })
+            return results
+
+        df_calc = df_typed.with_columns(
             (pl.col('_time_end') - pl.col('_time_begin')).dt.total_seconds().alias('duration_sec')
-        ).filter(
-            pl.col('duration_sec')>0
-        )
+        ).filter(pl.col('duration_sec') > 0)
+
         if df_calc.height > 5:
             res_dist = DistributionChecks.check_3sigma_outliers(
                 df=df_calc,
@@ -89,5 +101,12 @@ def get_logic_rules(df_self, df_ref=None):
                 threshold_sigma=3
             )
             results.append(res_dist)
+        else:
+            # 样本不足时也返回说明，便于日志可见
+            results.append({
+                "type": "distribution_3sigma_duration_sec",
+                "passed": True,
+                "msg": f"样本数不足以计算3-sigma（有效行: {df_calc.height}）"
+            })
 
     return results

@@ -59,7 +59,15 @@ class ConsistencyChecks:
         }
 
     @staticmethod
-    def check_chain_continuity(df, group_col, sort_col, current_time_col, prev_time_col, id_col=None):
+    def check_chain_continuity(
+        df,
+        group_col,
+        sort_col,
+        current_time_col,
+        prev_time_col,
+        id_col=None,
+        gap_threshold_seconds=0,
+    ):
         """
         通用：单表时间链连续性检查
         
@@ -94,13 +102,19 @@ class ConsistencyChecks:
             
         result_df = df_sorted.with_columns(cols_to_add)
 
-        # 3. 识别不连续点
+        # 3. 计算时间差（秒），允许容差 gap_threshold_seconds
+        result_df = result_df.with_columns(
+            (pl.col(sort_col) - pl.col("prev_end_time"))
+            .dt.total_seconds()
+            .alias("gap_seconds")
+        )
+
         # 异常条件：
-        # A. 上一行有数据 (is_not_null，排除每辆车的第一条记录)
-        # B. 当前行开始时间 (sort_col) != 上一行结束时间 (prev_end_time)
+        # A. 上一行有数据
+        # B. |gap_seconds| 大于允许容差
         violation_count = result_df.filter(
             (pl.col("prev_end_time").is_not_null()) &
-            (pl.col(sort_col) != pl.col("prev_end_time"))
+            (pl.col("gap_seconds").abs() > gap_threshold_seconds)
         )
 
         failed_count = violation_count.height

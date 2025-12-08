@@ -40,7 +40,10 @@ def _run_aqct_check(**context):
     context["ti"].xcom_push(key="qa_result", value=result)
 
     if result["status"] == "FAILED":
-        raise ValueError(f"FOUND {result['violations_count']}errors.")
+        # 统计失败样本总数（若规则返回 failed 字段则累加）
+        failed_rules = [d for d in result.get("details", []) if not d.get("passed", True)]
+        failed_samples = sum(d.get("failed", 0) or d.get("violation_count", 0) for d in failed_rules)
+        raise ValueError(f"FOUND {failed_samples} errors (rules failed: {len(failed_rules)})")
 
     return result
 
@@ -65,8 +68,10 @@ with DAG(
         to=recipients,
         subject='Cactus数据质量检测报告 ({{ dag_run.conf.get("date_filter", ds) }})',
         html_content="""
+        {% set r = task_instance.xcom_pull(task_ids='check_hutchisonports_ngen', key='qa_result') or {} %}
         <h3>数据质量检测运行完成</h3>
-        <pre>{{ task_instance.xcom_pull(task_ids='check_hutchisonports_ngen', key='qa_result').get('report_text', '暂无详细报告内容 (可能暂无数据更新)') }}</pre>
+        <p>状态: {{ r.get('status', 'UNKNOWN') }} | 失败规则数: {{ (r.get('details', []) | selectattr('passed', 'equalto', False) | list | length) if r.get('details') else 'N/A' }}</p>
+        <pre>{{ r.get('report_text', r) }}</pre>
         """,
         trigger_rule=TriggerRule.ALL_DONE,
     )
