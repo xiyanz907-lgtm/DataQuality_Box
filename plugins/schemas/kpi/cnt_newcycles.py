@@ -1,5 +1,4 @@
 import pandera as pa
-# from pandera import DataFrameSchema, Column, Check
 
 CntNewCyclesSchema = pa.DataFrameSchema(
     columns={

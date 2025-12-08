@@ -1,5 +1,4 @@
 import pandera as pa
-#from pandera import Column, Check, DataFrameSchema
 
 # 定义 Schema
 CntCyclesSchema = pa.DataFrameSchema(

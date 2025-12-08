@@ -1,20 +1,34 @@
 import polars as pl
-from airflow.providers.mysql.hooks.mysql import MySqlHook
 import importlib
 import logging
 import traceback
 import os
+from services.datasource import get_datasource
+from services.config import get_table_config
 
 logger = logging.getLogger("airflow.task")
 
 class LogicRunner:
     def __init__(self, cactus_conn_id, ngen_conn_id):
-        self.hook_kpi = MySqlHook(mysql_conn_id=cactus_conn_id)
-        self.hook_ngen = MySqlHook(mysql_conn_id=ngen_conn_id)
+        """Initialize data sources.
+
+        Args:
+            cactus_conn_id: Airflow connection id for KPI (cactus) database.
+            ngen_conn_id: Airflow connection id for nGen database.
+        """
+        # 数据源工厂：目前仅 mysql，后续可扩展
+        self.ds_kpi = get_datasource("mysql", cactus_conn_id)
+        self.ds_ngen = get_datasource("mysql", ngen_conn_id)
 
     def run_checks(self, table_name, date_filter):
-        """
-        V2版执行器：基于 CONFIG 字典驱动数据加载
+        """Run data quality checks for a specific table.
+
+        Args:
+            table_name: Target table name under kpi_data_db.
+            date_filter: Date string used for partition filtering (YYYY-MM-DD).
+
+        Returns:
+            dict: Aggregated result including status, violation_count, details, and report_text.
         """
         logger.info(f"🚀 [LogicRunner V2] 开始处理表: {table_name}, 日期: {date_filter}")
 
@@ -24,14 +38,17 @@ class LogicRunner:
         except ImportError:
             return {"status": "ERROR", "msg": f"Rule file rules/kpi/{table_name}.py not found", "report_text": "规则文件缺失"}
 
-        # 读取配置 (这就是 V2 的核心)
-        config = getattr(module, 'CONFIG', {"need_reference": False})
+        # 读取配置 (规则内配置 + 中央配置合并)
+        config_module = getattr(module, 'CONFIG', {"need_reference": False})
+        config_center = get_table_config(table_name)
+        # 中央配置优先覆盖
+        config = {**config_module, **config_center}
         
         df_self = None
         df_ref = None
 
         # =========================================================
-        # 场景 A: 需要 nGen 参考数据 (跨库)
+        # 场景 A: 需要参考数据 (跨库)
         # =========================================================
         if config.get("need_reference") and config.get("reference_source") == 'ngen':
             ref_table_name = config.get("reference_table", "ngen")
@@ -50,7 +67,7 @@ class LogicRunner:
             logger.info("正在拉取 nGen 数据(Filter:AT%)...")
             
             try:
-                df_ref_pd = self.hook_ngen.get_pandas_df(sql_ngen)
+                df_ref_pd = self.ds_ngen.get_pandas_df(sql_ngen)
                 df_ref_raw = pl.from_pandas(df_ref_pd)
                 
                 # ---nGen 数据清洗 ---
@@ -91,7 +108,7 @@ class LogicRunner:
                 
                 sql_kpi = f"SELECT * FROM kpi_data_db.{table_name} WHERE {source_key} IN ({ids_str})"
                 logger.info(f"正在拉取 Cactus 数据 (过滤 {len(ids)} 个ID)...")
-                df_self = pl.from_pandas(self.hook_kpi.get_pandas_df(sql_kpi))
+                df_self = pl.from_pandas(self.ds_kpi.get_pandas_df(sql_kpi))
                 
                 # Cactus 数据清洗 (截取前19位)
                 if df_self.height > 0:
@@ -102,14 +119,27 @@ class LogicRunner:
                     )
 
         # =========================================================
-        # 场景 B: 单表模式 (不需要 nGen)
+        # 场景 B: 单表模式 (不需要参考库)
         # =========================================================
         else:
             logger.info("单表模式: 仅拉取自采数据...")
-            # 兼容不同表的日期字段，默认 _time_begin，允许在 CONFIG 中通过 date_filter_column 覆盖
+            # 兼容不同表的日期字段，默认 _time_begin，允许配置覆盖
             date_col = config.get("date_filter_column", "_time_begin")
-            sql_kpi = f"SELECT * FROM kpi_data_db.{table_name} WHERE DATE({date_col}) = '{date_filter}'"
-            df_self = pl.from_pandas(self.hook_kpi.get_pandas_df(sql_kpi))
+            limit_clause = ""
+            if config.get("sql_limit"):
+                limit_clause = f" LIMIT {config['sql_limit']}"
+
+            sql_tpl = config.get("select_sql_template")
+            if sql_tpl:
+                sql_kpi = sql_tpl.format(
+                    table_name=table_name,
+                    date_filter=date_filter,
+                    date_col=date_col,
+                    limit_clause=limit_clause
+                )
+            else:
+                sql_kpi = f"SELECT * FROM kpi_data_db.{table_name} WHERE DATE({date_col}) = '{date_filter}'{limit_clause}"
+            df_self = pl.from_pandas(self.ds_kpi.get_pandas_df(sql_kpi))
             # 可以在这里补充单表的时间清洗逻辑...
 
         # =========================================================

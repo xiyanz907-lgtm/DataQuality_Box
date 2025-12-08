@@ -28,15 +28,6 @@ def _run_new_check(**context):
     target_date = context['params'].get('date_filter') or context.get('ds')
     print(f"FINAL TARGET DATE: {target_date}")
 
-    # 旧调用方式（已废弃，保留注释以便追溯）
-    # result = LogicRunner(
-    #     cactus_conn_id='cactus_mysql_conn', 
-    #     ngen_conn_id='ngen_mysql_conn', # 占位符，虽然没用到
-    #     ngen_table_name='None',         # 占位符
-    #     date_filter=target_date,
-    #     target_table_type="cnt_newcycles" 
-    # )
-
     runner = LogicRunner(
         cactus_conn_id='cactus_mysql_conn',
         ngen_conn_id='ngen_mysql_conn'
@@ -65,6 +56,8 @@ with DAG(
     default_args=default_args,
     schedule=None,
     catchup=False,
+    max_active_runs=1,
+    concurrency=5,
     tags=["kpi", "ngen","new_cycles"]
 ) as dag:
 

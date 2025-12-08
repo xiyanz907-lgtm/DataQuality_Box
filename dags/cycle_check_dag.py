@@ -53,6 +53,8 @@ with DAG(
     default_args=default_args,
     schedule=None,
     catchup=False,
+    max_active_runs=1,
+    concurrency=5,
     tags=["kpi", "ngen"],
 ) as dag:
 

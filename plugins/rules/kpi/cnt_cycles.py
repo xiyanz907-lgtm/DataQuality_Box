@@ -6,17 +6,15 @@ from dq_lib.consistency import ConsistencyChecks
 from dq_lib.distribution import DistributionChecks
 
 # 1. 定义配置信息 (给 Runner 看的)
-# Runner 看到这个 CONFIG，就知道运行前要去拉取 nGen 的数据
+# 提示：中央配置在 services/config.py，会覆盖此处同名键
 CONFIG = {
     "need_reference": True,           # 需要参考数据
     "reference_source": "ngen",       # 参考源是 nGen
     "reference_table": "ngen",        # nGen 里的表名 (数据库是 hutchisonports)
     "join_key_target": "Tractor_Cycle_Id", # nGen 的关联键
-    "join_key_source": "cycleId"           # 自采表的关联键
+    "join_key_source": "cycleId",          # 自采表的关联键
+    "threshold_time_diff": int(os.getenv("THRESHOLD_TIME_DIFF", 300)), # 默认 300 秒
 }
-
-# 从环境变量读取阈值，默认 300秒
-THRESHOLD = int(os.getenv("THRESHOLD_TIME_DIFF", 300))
 
 # 2. 定义业务规则逻辑 (给 Runner 调用的入口函数)
 def get_logic_rules(df_self, df_ref=None):
@@ -49,21 +47,9 @@ def get_logic_rules(df_self, df_ref=None):
             right_key='Tractor_Cycle_Id',
             left_col='_time_end',
             right_col='Off_Chasis_Datetime',
-            threshold=THRESHOLD
+            threshold=config.get("threshold_time_diff", 300)
         )
         results.append(res_cons)
-
-        #  # 3. 一致性 - 箱号 (Container No)
-        #
-        # res_cnt = ConsistencyChecks.check_field_equality(
-        #     df_left=df_self,
-        #     df_right=df_ref,
-        #     left_key='cycleId',
-        #     right_key='Tractor_Cycle_Id',
-        #     left_col='cnt01',        # 自采箱号字段
-        #     right_col='Container_No' # nGen箱号字段
-        # )
-        # results.append(res_cnt)
 
     else:
         # 如果 nGen 没数据，或者没传进来，记录一条警告
@@ -77,22 +63,26 @@ def get_logic_rules(df_self, df_ref=None):
     # 3-Sigma 异常检测
     if df_self is not None and df_self.height > 0:
         # 计算作业时长（确保时间字段为 datetime）
-        try:
-            df_typed = df_self.with_columns(
-                pl.col('_time_end').cast(pl.String).str.slice(0, 19).str.to_datetime(strict=False),
-                pl.col('_time_begin').cast(pl.String).str.slice(0, 19).str.to_datetime(strict=False),
-            )
-        except Exception as e:
-            results.append({
-                "type": "distribution_3sigma_duration_sec",
-                "passed": False,
-                "msg": f"时间字段解析失败: {e}"
-            })
-            return results
+        # 如果 SQL 已计算 duration_sec，优先复用；否则本地计算
+        if 'duration_sec' in df_self.columns:
+            df_calc = df_self.filter(pl.col('duration_sec') > 0)
+        else:
+            try:
+                df_typed = df_self.with_columns(
+                    pl.col('_time_end').cast(pl.String).str.slice(0, 19).str.to_datetime(strict=False),
+                    pl.col('_time_begin').cast(pl.String).str.slice(0, 19).str.to_datetime(strict=False),
+                )
+            except Exception as e:
+                results.append({
+                    "type": "distribution_3sigma_duration_sec",
+                    "passed": False,
+                    "msg": f"时间字段解析失败: {e}"
+                })
+                return results
 
-        df_calc = df_typed.with_columns(
-            (pl.col('_time_end') - pl.col('_time_begin')).dt.total_seconds().alias('duration_sec')
-        ).filter(pl.col('duration_sec') > 0)
+            df_calc = df_typed.with_columns(
+                (pl.col('_time_end') - pl.col('_time_begin')).dt.total_seconds().alias('duration_sec')
+            ).filter(pl.col('duration_sec') > 0)
 
         if df_calc.height > 5:
             res_dist = DistributionChecks.check_3sigma_outliers(
