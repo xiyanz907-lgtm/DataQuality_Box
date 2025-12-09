@@ -40,6 +40,8 @@ def get_logic_rules(df_self, df_ref=None):
 
         # 【规则 2】一致性检查：时间差是否在阈值内
         # 使用工具库里的 check_time_consistency
+        # 从模块级 CONFIG 或环境变量获取阈值
+        threshold = CONFIG.get("threshold_time_diff", int(os.getenv("THRESHOLD_TIME_DIFF", 300)))
         res_cons = ConsistencyChecks.check_time_consistency(
             df_left=df_self,
             df_right=df_ref,
@@ -47,7 +49,7 @@ def get_logic_rules(df_self, df_ref=None):
             right_key='Tractor_Cycle_Id',
             left_col='_time_end',
             right_col='Off_Chasis_Datetime',
-            threshold=config.get("threshold_time_diff", 300)
+            threshold=threshold
         )
         results.append(res_cons)
 
