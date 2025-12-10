@@ -2,7 +2,7 @@ import os
 import sys
 import pendulum
 from airflow.decorators import dag, task
-from airflow.operators.email import EmailOperator
+# from airflow.operators.email import EmailOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 # 确保 plugins 路径在 sys.path 中
@@ -32,8 +32,36 @@ def worker_cycle_check():
         """
         任务 1: 确定用于处理的 ID 批次。
         返回包含 'id_range' 的字典列表。
+        支持两种模式:
+        1. ID Range Mode (Source A Trigger): 直接使用传入的 ID 范围
+        2. Date Mode (Source B Trigger / Manual): 根据日期查询 ID 范围
         """
-        target_date = context["dag_run"].conf.get("date_filter", context["ds"])
+        conf = context["dag_run"].conf
+        mode = conf.get("mode")
+        batches = []
+
+        # --- 模式 1: ID Range Mode ---
+        if mode == "id_range":
+            start_id = conf.get("start_id")
+            end_id = conf.get("end_id")
+            print(f"🚀 Running in ID Range Mode: {start_id} - {end_id}")
+            
+            if start_id is not None and end_id is not None:
+                current_start = int(start_id)
+                final_end = int(end_id)
+                while current_start <= final_end:
+                    current_end = min(current_start + BATCH_SIZE - 1, final_end)
+                    batches.append({"id_range": (current_start, current_end)})
+                    current_start += BATCH_SIZE
+            else:
+                print("❌ ID Range mode missing start_id or end_id")
+            
+            print(f"Generated {len(batches)} batches from ID range.")
+            return batches
+
+        # --- 模式 2: Date Mode ---
+        target_date = conf.get("date_filter", context["ds"])
+        print(f"📅 Running in Date Mode: {target_date}")
         table_name = "cnt_cycles"
         
         runner = LogicRunner(
@@ -44,7 +72,6 @@ def worker_cycle_check():
         # 尝试获取 ID 边界
         min_id, max_id = runner.get_id_boundaries(table_name, target_date)
         
-        batches = []
         if min_id is not None and max_id is not None:
             print(f"Found ID boundaries: {min_id} - {max_id}. Generating shards...")
             current_start = min_id
@@ -89,85 +116,46 @@ def worker_cycle_check():
     def summarize_results(results, **context):
         """
         任务 3: 聚合所有分片的结果。
+        使用 ReportGenerator 生成统一的 HTML 报告
         """
-        # 显式将 LazyXComAccess 转换为 list 以避免 JSON 序列化错误
+        from services.report_generator import ReportGenerator
+
+        # 显式将 LazyXComAccess 转换为 list
         results = list(results)
         
-        total_shards = len(results)
-        failed_shards = 0
-        total_violations = 0
-        status = "SUCCESS"
+        # 调用通用生成器
+        summary_dict = ReportGenerator.generate_html_report(results, title="Cactus CycleCheck 质量检测报告")
         
-        report_lines = []
+        print(summary_dict["report_text"])
         
-        for res in results:
-            if res.get("status") == "FAILED":
-                failed_shards += 1
-                status = "FAILED"
-            
-            total_violations += res.get("violation_count", 0)
-            
-            # 收集每个分片的简要报告
-            shard_info = res.get("shard_info", "Full Date")
-            shard_status = res.get("status", "UNKNOWN")
-            shard_violations = res.get("violation_count", 0)
-            
-            if shard_status == "FAILED" or shard_violations > 0:
-                report_lines.append(f"Shard {shard_info}: {shard_status} ({shard_violations} violations)")
-        
-        summary_text = (
-            f"Total Shards: {total_shards}\n"
-            f"Failed Shards: {failed_shards}\n"
-            f"Total Violations: {total_violations}\n"
-            f"Overall Status: {status}\n\n"
-            "--- Details ---\n" +
-            "\n".join(report_lines)
-        )
-        
-        print(summary_text)
-        
-        final_result = {
-            "status": status,
-            "total_shards": total_shards,
-            "failed_shards": failed_shards,
-            "violation_count": total_violations,
-            "report_text": summary_text,
-            "details": results # 可选: 如果分片太多，可能会导致 XCom 过大
-        }
-        
-        # 存入 XCom 供 EmailOperator 使用
-        context["ti"].xcom_push(key="qa_result", value=final_result)
-        
-        if status == "FAILED":
-             # 仅作为标记，不阻断 Email 发送
-             pass
-             
-        return final_result
+        # 存入 XCom
+        context["ti"].xcom_push(key="qa_result", value=summary_dict)
+
+        # 抛出异常以便将任务状态标记为 failed，供 global_alert_reporter 轮询
+        if summary_dict.get("status") == "FAILED":
+             raise ValueError(f"Data Quality Checks Failed: {summary_dict.get('violation_count')} violations found.")
+
+        return summary_dict
 
     # 定义 DAG 结构
     batches = get_batches()
     results = run_check_shard.expand(shard_config=batches)
     summary = summarize_results(results)
     
-    # 任务 4: 邮件通知
-    recipients = os.getenv("ALERT_EMAIL_TO", "xiyan.zhou@westwell-lab.com")
-    send_email = EmailOperator(
-        task_id="send_report_email",
-        to=recipients,
-        subject='Cactus数据质量检测报告 ({{ dag_run.conf.get("date_filter", ds) }})',
-        html_content="""
-        {% set r = task_instance.xcom_pull(task_ids='summarize_results', key='qa_result') or {} %}
-        <h3>数据质量检测运行完成 (Sharded)</h3>
-        <p><b>状态:</b> {{ r.get('status', 'UNKNOWN') }}</p>
-        <p><b>分片统计:</b> 总计 {{ r.get('total_shards') }} | 失败 {{ r.get('failed_shards') }}</p>
-        <p><b>总异常数:</b> {{ r.get('violation_count') }}</p>
-        <hr/>
-        <pre>{{ r.get('report_text', 'No report text') }}</pre>
-        """,
-        trigger_rule=TriggerRule.ALL_DONE,
-    )
+    # 任务 4: 邮件通知 (已移至 global_alert_reporter)
+    # recipients = os.getenv("ALERT_EMAIL_TO", "xiyan.zhou@westwell-lab.com")
+    # send_email = EmailOperator(
+    #     task_id="send_report_email",
+    #     to=recipients,
+    #     subject='[Quality] Cactus 数据质量检测报告 ({{ dag_run.conf.get("date_filter", ds) }})',
+    #     html_content="""
+    #     {% set r = task_instance.xcom_pull(task_ids='summarize_results', key='qa_result') or {} %}
+    #     {{ r.get('html_report', 'Error generating report') }}
+    #     """,
+    #     trigger_rule=TriggerRule.ALL_DONE,
+    # )
 
-    summary >> send_email
+    # summary >> send_email
 
 # 实例化 DAG
 worker_cycle_check()

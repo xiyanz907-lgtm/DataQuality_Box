@@ -121,9 +121,15 @@ class LogicRunner:
             # 动态构建 WHERE 子句
             if id_range:
                 start_id, end_id = id_range
+                # 策略: 物理 ID 分片模式 (针对新数据)
+                # 直接使用 ID 范围圈定一批数据，不叠加日期过滤。
+                # 理由: nGen 数据的 ID 是物理连续的导入批次，但业务日期可能是乱序的。
+                # 使用 ID 范围可以保证该批次数据被完整检测，不漏掉任何一条。
                 where_clause = f"{id_col} BETWEEN {start_id} AND {end_id}"
                 logger.info(f"使用 ID 分片模式: {where_clause}")
             else:
+                # 策略: 业务日期模式 (针对旧数据更新)
+                # 使用日期过滤，覆盖全天的所有数据。
                 where_clause = f"STR_TO_DATE(On_Chasis_Datetime, '%d/%m/%Y') = STR_TO_DATE('{date_filter}', '%Y-%m-%d')"
                 logger.info(f"使用日期过滤模式: {where_clause}")
 
@@ -244,8 +250,46 @@ class LogicRunner:
         failed_count = sum([1 for r in report_list if not r.get('passed', True)])
         final_status = "FAILED" if failed_count > 0 else "SUCCESS"
         
+        # 提取时间范围供报告使用 (如果存在)
+        time_range = "N/A"
+        if df_ref is not None and df_ref.height > 0:
+             try:
+                min_t = df_ref["On_Chasis_Datetime"].min().strftime("%m-%d %H:%M")
+                max_t = df_ref["On_Chasis_Datetime"].max().strftime("%m-%d %H:%M")
+                time_range = f"{min_t} ~ {max_t}"
+             except:
+                 pass
+
+        # 提取失败规则详情
+        failed_rules = []
+        for r in report_list:
+            if not r.get('passed', True):
+                # 尝试提取样本数据 (标准化字段: missing_samples, failed_samples, outlier_samples)
+                samples = []
+                for sample_key in ['missing_samples', 'failed_samples', 'outlier_samples']:
+                    raw_samples = r.get(sample_key)
+                    if raw_samples and isinstance(raw_samples, list):
+                        # 增强版提取：保留 Key 名称，例如 "Tractor_Cycle_Id: 12345"
+                        extracted_info = []
+                        for s in raw_samples:
+                            if isinstance(s, dict) and s:
+                                # 尝试提取第一个键值对，或者提取所有键值对
+                                # 这里为了简洁，取第一个 Key-Value
+                                first_k, first_v = list(s.items())[0]
+                                extracted_info.append(f"{first_k}: {first_v}")
+                        
+                        if extracted_info:
+                            samples.extend(extracted_info)
+                            break # 找到一种样本格式就够了
+
+                failed_rules.append({
+                    "rule": r.get('type', 'Unknown'),
+                    "msg": str(r.get('msg', 'No message'))[:100], # 截断过长信息
+                    "samples": samples[:5] # 最多取5个
+                })
+
         # 生成报告文本（通过场景也打印关键统计信息）
-        report_str = f"检测表: {table_name}\n日期: {date_filter}\n状态: {final_status}\n\n"
+        report_str = f"检测表: {table_name}\n日期: {date_filter}\n时间范围: {time_range}\n状态: {final_status}\n\n"
         for r in report_list:
             status_icon = "✅" if r.get('passed') else "❌"
             report_str += f"{status_icon} [{r.get('type', 'Check')}]\n"
@@ -265,5 +309,7 @@ class LogicRunner:
             "status": final_status,
             "violation_count": failed_count,
             "details": report_list,
-            "report_text": report_str
+            "report_text": report_str,
+            "meta_time_range": time_range,
+            "meta_failed_rules": failed_rules
         }
