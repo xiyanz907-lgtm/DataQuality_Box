@@ -67,7 +67,7 @@ with DAG(
     )
 
     # 发邮件
-    recipients = os.getenv("ALTER_EMAIL_TO", "xiyan.zhou@westwell-lab.com")
+    recipients = os.getenv("ALERT_EMAIL_TO", "xiyan.zhou@westwell-lab.com")
     send_email = EmailOperator(
         task_id="send_report_email",
         to=recipients,

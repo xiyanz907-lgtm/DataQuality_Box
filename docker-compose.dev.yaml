@@ -79,8 +79,8 @@ services:
 
             # 【注入普通变量】
       - SITE_TIMEZONE=${SITE_TIMEZONE}
-      - ALTER_EMAIL_TO=${ALTER_EMAIL_TO}
-      - THREAD_TIME_DIFF=${THREAD_TIME_DIFF}
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO}
+      - THRESHOLD_TIME_DIFF=${THRESHOLD_TIME_DIFF}
       - BATCH_SIZE=${BATCH_SIZE}
 
             # 【注入SMTP配置】

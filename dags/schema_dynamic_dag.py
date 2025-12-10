@@ -28,13 +28,13 @@ TABLES_TO_CHECK = [
         "table_name": "kpi_data_db.cnt_cycles",   
         "schema_obj": CntCyclesSchema,            
         "task_id": "cnt_cycles",                  
-        "batch_size": 50000
+        "batch_size": int(os.getenv("BATCH_SIZE", 50000))
     },
     {
         "table_name": "kpi_data_db.cnt_newcycles",
         "schema_obj": CntNewCyclesSchema,
         "task_id": "new_cnt_cycles",
-        "batch_size": 50000
+        "batch_size": int(os.getenv("BATCH_SIZE", 50000))
     }
 ]
 
@@ -118,6 +118,6 @@ with DAG(
                 "table_name": config["table_name"],
                 "schema_obj": config["schema_obj"],
                 "task_id": config["task_id"],
-                "batch_size": config.get("batch_size", 50000)
+                "batch_size": config.get("batch_size", int(os.getenv("BATCH_SIZE", 50000)))
             }
         )

@@ -13,7 +13,7 @@
    - 设置 Airflow 变量/连接（至少）：
      - 连接：`cactus_mysql_conn`（指向 kpi 数据库），`ngen_mysql_conn`（指向 nGen），可选 `postgres`/`smtp` 等按现有部署。
      - 变量：`ngen_last_processed_id`，`logic_watermark_cnt_newcycles`，`schema_watermark_cnt_cycles`，`schema_watermark_new_cnt_cycles`（或按业务重命名）。
-   - 环境变量（可选）：`SITE_TIMEZONE`（默认 UTC），`THRESHOLD_TIME_DIFF`（默认 300 秒），`ALTER_EMAIL_TO`（收件人）。
+   - 环境变量（可选）：`SITE_TIMEZONE`（默认 UTC），`THRESHOLD_TIME_DIFF`（默认 300 秒），`ALERT_EMAIL_TO`（收件人）。
 3) 初始化与首跑
    - 启动 Airflow：`airflow db init`，`airflow webserver`，`airflow scheduler`（或使用随附 docker-compose）。
    - 首次手动触发：

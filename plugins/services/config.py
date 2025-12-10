@@ -13,6 +13,7 @@ TABLE_CONFIGS = {
         "reference_table": "ngen",
         "join_key_target": "Tractor_Cycle_Id",
         "join_key_source": "cycleId",
+        "reference_id_col": "id",
         # 阈值支持环境变量覆盖，保持默认 300 秒
         "threshold_time_diff": int(os.getenv("THRESHOLD_TIME_DIFF", 300)),
         # 单表日期过滤列（单表模式备用）
@@ -25,6 +26,8 @@ TABLE_CONFIGS = {
             "WHERE DATE({date_col}) = '{{date_filter}}'{{limit_clause}}"
         ),
         "sql_limit": os.getenv("CNT_CYCLES_SQL_LIMIT"),  # 可选限制行数
+        # 动态窗口缓冲时间（小时），覆盖时区差异/时钟偏差，默认 3 小时
+        "time_window_buffer_hours": int(os.getenv("TIME_WINDOW_BUFFER_HOURS", 3)),
     },
     "cnt_newcycles": {
         "need_reference": False,

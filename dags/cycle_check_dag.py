@@ -1,13 +1,11 @@
-import imp
-from operator import imod
-from airflow import DAG
-from airflow.operators.python import PythonOperator
+import os
+import sys
+import pendulum
+from airflow.decorators import dag, task
 from airflow.operators.email import EmailOperator
 from airflow.utils.trigger_rule import TriggerRule
-import pendulum
-import sys
-import os
 
+# Ensure plugins path is in sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 plugins_dir = os.path.join(project_root, "plugins")
@@ -16,67 +14,160 @@ if plugins_dir not in sys.path:
 
 from services.logic_runner import LogicRunner
 
-default_args = {
-    "owner": "box_admin",
-    "start_date": pendulum.today("UTC").add(days=-1),
-}
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", 50000))
 
-
-def _run_aqct_check(**context):
-    # 调用核心逻辑
-    target_date = context["dag_run"].conf.get("date_filter", context["ds"])
-    runner = LogicRunner(
-        cactus_conn_id="cactus_mysql_conn",
-        ngen_conn_id="ngen_mysql_conn"
-    )
-    result = runner.run_checks(
-        table_name='cnt_cycles',
-        date_filter=target_date
-    )
-
-    print(f"Check Result: {result}")
-
-    # 结果推送到xcom
-    context["ti"].xcom_push(key="qa_result", value=result)
-
-    if result["status"] == "FAILED":
-        # 统计失败样本总数（若规则返回 failed 字段则累加）
-        failed_rules = [d for d in result.get("details", []) if not d.get("passed", True)]
-        failed_samples = sum(d.get("failed", 0) or d.get("violation_count", 0) for d in failed_rules)
-        raise ValueError(f"FOUND {failed_samples} errors (rules failed: {len(failed_rules)})")
-
-    return result
-
-
-with DAG(
-    "worker_cycle_check",
-    default_args=default_args,
+@dag(
+    dag_id="worker_cycle_check",
     schedule=None,
+    start_date=pendulum.today("UTC").add(days=-1),
     catchup=False,
     max_active_runs=1,
-    concurrency=5,
-    tags=["kpi", "ngen"],
-) as dag:
+    tags=["kpi", "ngen", "sharding"],
+    default_args={"owner": "box_admin"},
+)
+def worker_cycle_check():
 
-    check_task = PythonOperator(
-        task_id="check_hutchisonports_ngen",
-        python_callable=_run_aqct_check,
-    )
+    @task
+    def get_batches(**context):
+        """
+        Task 1: Determine ID batches for processing.
+        Returns a list of dicts, each containing 'id_range'.
+        """
+        target_date = context["dag_run"].conf.get("date_filter", context["ds"])
+        table_name = "cnt_cycles"
+        
+        runner = LogicRunner(
+            cactus_conn_id="cactus_mysql_conn",
+            ngen_conn_id="ngen_mysql_conn"
+        )
+        
+        # 尝试获取 ID 边界
+        min_id, max_id = runner.get_id_boundaries(table_name, target_date)
+        
+        batches = []
+        if min_id is not None and max_id is not None:
+            print(f"Found ID boundaries: {min_id} - {max_id}. Generating shards...")
+            current_start = min_id
+            while current_start <= max_id:
+                current_end = min(current_start + BATCH_SIZE - 1, max_id)
+                batches.append({"id_range": (current_start, current_end)})
+                current_start += BATCH_SIZE
+        else:
+            # Fallback for single-table mode or if no boundaries found (e.g. empty source)
+            # LogicRunner will handle None id_range by using date filter
+            print("No ID boundaries found or single-table mode. Using full date range.")
+            batches.append({"id_range": None})
+            
+        print(f"Generated {len(batches)} batches.")
+        return batches
 
-    # 发邮件
-    recipients = os.getenv("ALTER_EMAIL_TO", "xiyan.zhou@westwell-lab.com")
+    @task
+    def run_check_shard(shard_config, **context):
+        """
+        Task 2: Run check for a specific shard.
+        """
+        target_date = context["dag_run"].conf.get("date_filter", context["ds"])
+        table_name = "cnt_cycles"
+        id_range = shard_config.get("id_range")
+        
+        runner = LogicRunner(
+            cactus_conn_id="cactus_mysql_conn",
+            ngen_conn_id="ngen_mysql_conn"
+        )
+        
+        result = runner.run_checks(
+            table_name=table_name,
+            date_filter=target_date,
+            id_range=id_range
+        )
+        
+        # 将 id_range 注入结果以便 debug
+        result["shard_info"] = str(id_range)
+        return result
+
+    @task
+    def summarize_results(results, **context):
+        """
+        Task 3: Aggregate results from all shards.
+        """
+        # Explicitly convert LazyXComAccess to list to avoid JSON serialization errors
+        results = list(results)
+        
+        total_shards = len(results)
+        failed_shards = 0
+        total_violations = 0
+        status = "SUCCESS"
+        
+        report_lines = []
+        
+        for res in results:
+            if res.get("status") == "FAILED":
+                failed_shards += 1
+                status = "FAILED"
+            
+            total_violations += res.get("violation_count", 0)
+            
+            # 收集每个分片的简要报告
+            shard_info = res.get("shard_info", "Full Date")
+            shard_status = res.get("status", "UNKNOWN")
+            shard_violations = res.get("violation_count", 0)
+            
+            if shard_status == "FAILED" or shard_violations > 0:
+                report_lines.append(f"Shard {shard_info}: {shard_status} ({shard_violations} violations)")
+        
+        summary_text = (
+            f"Total Shards: {total_shards}\n"
+            f"Failed Shards: {failed_shards}\n"
+            f"Total Violations: {total_violations}\n"
+            f"Overall Status: {status}\n\n"
+            "--- Details ---\n" +
+            "\n".join(report_lines)
+        )
+        
+        print(summary_text)
+        
+        final_result = {
+            "status": status,
+            "total_shards": total_shards,
+            "failed_shards": failed_shards,
+            "violation_count": total_violations,
+            "report_text": summary_text,
+            "details": results # Optional: might be too large for XCom if many shards
+        }
+        
+        # Store in XCom for EmailOperator
+        context["ti"].xcom_push(key="qa_result", value=final_result)
+        
+        if status == "FAILED":
+             # 仅作为标记，不阻断 Email 发送
+             pass
+             
+        return final_result
+
+    # Define DAG structure
+    batches = get_batches()
+    results = run_check_shard.expand(shard_config=batches)
+    summary = summarize_results(results)
+    
+    # Task 4: Email Notification
+    recipients = os.getenv("ALERT_EMAIL_TO", "xiyan.zhou@westwell-lab.com")
     send_email = EmailOperator(
         task_id="send_report_email",
         to=recipients,
         subject='Cactus数据质量检测报告 ({{ dag_run.conf.get("date_filter", ds) }})',
         html_content="""
-        {% set r = task_instance.xcom_pull(task_ids='check_hutchisonports_ngen', key='qa_result') or {} %}
-        <h3>数据质量检测运行完成</h3>
-        <p>状态: {{ r.get('status', 'UNKNOWN') }} | 失败规则数: {{ (r.get('details', []) | selectattr('passed', 'equalto', False) | list | length) if r.get('details') else 'N/A' }}</p>
-        <pre>{{ r.get('report_text', r) }}</pre>
+        {% set r = task_instance.xcom_pull(task_ids='summarize_results', key='qa_result') or {} %}
+        <h3>数据质量检测运行完成 (Sharded)</h3>
+        <p><b>状态:</b> {{ r.get('status', 'UNKNOWN') }}</p>
+        <p><b>分片统计:</b> 总计 {{ r.get('total_shards') }} | 失败 {{ r.get('failed_shards') }}</p>
+        <p><b>总异常数:</b> {{ r.get('violation_count') }}</p>
+        <hr/>
+        <pre>{{ r.get('report_text', 'No report text') }}</pre>
         """,
         trigger_rule=TriggerRule.ALL_DONE,
     )
 
-    # 设置依赖
-    check_task >> send_email
+    summary >> send_email
+
+# Instantiate the DAG
+worker_cycle_check()

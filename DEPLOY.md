@@ -16,7 +16,7 @@
   - `AIRFLOW__CORE__SQL_ALCHEMY_CONN`：Airflow 元数据库连接串（PostgreSQL）。
   - `AIRFLOW_CONN_CACTUS_MYSQL_CONN`：业务库连接，格式 `mysql://user:pass@host:port/dbname`。
   - `AIRFLOW_CONN_NGEN_MYSQL_CONN`：nGen 参考库连接，格式同上。
-  - `ALTER_EMAIL_TO`：告警/报告收件人邮箱。
+  - `ALERT_EMAIL_TO`：告警/报告收件人邮箱。
   - `THRESHOLD_TIME_DIFF`：时间差阈值（秒），默认 300。
   - `CNT_CYCLES_SQL_LIMIT`：单日样本读取 LIMIT（可选，控制 3-sigma 内存占用）。
   - `SITE_TIMEZONE`：站点时区，默认 UTC。
