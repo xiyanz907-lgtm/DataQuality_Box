@@ -5,7 +5,7 @@ from airflow.decorators import dag, task
 from airflow.operators.email import EmailOperator
 from airflow.utils.trigger_rule import TriggerRule
 
-# Ensure plugins path is in sys.path
+# 确保 plugins 路径在 sys.path 中
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 plugins_dir = os.path.join(project_root, "plugins")
@@ -30,8 +30,8 @@ def worker_cycle_check():
     @task
     def get_batches(**context):
         """
-        Task 1: Determine ID batches for processing.
-        Returns a list of dicts, each containing 'id_range'.
+        任务 1: 确定用于处理的 ID 批次。
+        返回包含 'id_range' 的字典列表。
         """
         target_date = context["dag_run"].conf.get("date_filter", context["ds"])
         table_name = "cnt_cycles"
@@ -53,8 +53,8 @@ def worker_cycle_check():
                 batches.append({"id_range": (current_start, current_end)})
                 current_start += BATCH_SIZE
         else:
-            # Fallback for single-table mode or if no boundaries found (e.g. empty source)
-            # LogicRunner will handle None id_range by using date filter
+            # 单表模式或未找到边界（如源表为空）的兜底逻辑
+            # LogicRunner 将使用日期过滤来处理 id_range 为 None 的情况
             print("No ID boundaries found or single-table mode. Using full date range.")
             batches.append({"id_range": None})
             
@@ -64,7 +64,7 @@ def worker_cycle_check():
     @task
     def run_check_shard(shard_config, **context):
         """
-        Task 2: Run check for a specific shard.
+        任务 2: 对特定分片运行检查。
         """
         target_date = context["dag_run"].conf.get("date_filter", context["ds"])
         table_name = "cnt_cycles"
@@ -88,9 +88,9 @@ def worker_cycle_check():
     @task
     def summarize_results(results, **context):
         """
-        Task 3: Aggregate results from all shards.
+        任务 3: 聚合所有分片的结果。
         """
-        # Explicitly convert LazyXComAccess to list to avoid JSON serialization errors
+        # 显式将 LazyXComAccess 转换为 list 以避免 JSON 序列化错误
         results = list(results)
         
         total_shards = len(results)
@@ -132,10 +132,10 @@ def worker_cycle_check():
             "failed_shards": failed_shards,
             "violation_count": total_violations,
             "report_text": summary_text,
-            "details": results # Optional: might be too large for XCom if many shards
+            "details": results # 可选: 如果分片太多，可能会导致 XCom 过大
         }
         
-        # Store in XCom for EmailOperator
+        # 存入 XCom 供 EmailOperator 使用
         context["ti"].xcom_push(key="qa_result", value=final_result)
         
         if status == "FAILED":
@@ -144,12 +144,12 @@ def worker_cycle_check():
              
         return final_result
 
-    # Define DAG structure
+    # 定义 DAG 结构
     batches = get_batches()
     results = run_check_shard.expand(shard_config=batches)
     summary = summarize_results(results)
     
-    # Task 4: Email Notification
+    # 任务 4: 邮件通知
     recipients = os.getenv("ALERT_EMAIL_TO", "xiyan.zhou@westwell-lab.com")
     send_email = EmailOperator(
         task_id="send_report_email",
@@ -169,5 +169,5 @@ def worker_cycle_check():
 
     summary >> send_email
 
-# Instantiate the DAG
+# 实例化 DAG
 worker_cycle_check()
