@@ -70,19 +70,40 @@ class ReportGenerator:
 
             # 2. 生成异常详情行
             if shard_status == "FAILED" or shard_violations > 0:
-                errors_preview_list = []
-                for f in res.get("meta_failed_rules", [])[:3]:
+                errors_html_list = []
+                all_failed_rules = res.get("meta_failed_rules", [])
+                
+                # 前3个直接显示
+                for f in all_failed_rules[:3]:
                     rule_display = f.get('rule', 'Unknown')
                     samples = f.get('samples', [])
                     if samples:
-                        # 简单的防注入处理
                         sample_str = ", ".join(samples).replace("<", "&lt;").replace(">", "&gt;")
                         rule_display += f" <span style='color:#777; font-size:0.85em'>[{sample_str}]</span>"
-                    errors_preview_list.append(rule_display)
+                    errors_html_list.append(f"<div>{rule_display}</div>")
 
-                errors_preview = "<br/>".join(errors_preview_list)
-                if len(res.get("meta_failed_rules", [])) > 3:
-                     errors_preview += "<br/>..."
+                # 超过3个或是想看完整信息，放入折叠块
+                if len(all_failed_rules) > 3 or any(len(f.get('samples', [])) >= 5 for f in all_failed_rules):
+                    remaining_html = []
+                    # 从第4个开始，或者重新列出所有（为了完整性，这里我们把所有的都放进折叠区域，或者只放剩下的）
+                    # 策略：折叠区域显示"完整列表"
+                    
+                    full_list_html = []
+                    for f in all_failed_rules:
+                        r_name = f.get('rule', 'Unknown')
+                        r_samples = f.get('samples', [])
+                        r_s_str = ", ".join(r_samples).replace("<", "&lt;").replace(">", "&gt;")
+                        full_list_html.append(f"<li><b>{r_name}</b>: {r_s_str}</li>")
+                    
+                    details_block = f"""
+                    <details>
+                        <summary>View All Violations ({len(all_failed_rules)} rules)</summary>
+                        <ul style="margin:5px 0 0 15px; padding:0; font-size:0.85em; color:#555;">
+                            {"".join(full_list_html)}
+                        </ul>
+                    </details>
+                    """
+                    errors_html_list.append(details_block)
 
                 row = f"""
                 <tr>
@@ -90,7 +111,7 @@ class ReportGenerator:
                     <td>{time_range}</td>
                     <td style="color:red"><b>{shard_status}</b></td>
                     <td>{shard_violations}</td>
-                    <td><small>{errors_preview}</small></td>
+                    <td>{"".join(errors_html_list)}</td>
                 </tr>
                 """
                 report_details_html.append(row)

@@ -285,7 +285,7 @@ class LogicRunner:
                 failed_rules.append({
                     "rule": r.get('type', 'Unknown'),
                     "msg": str(r.get('msg', 'No message'))[:100], # 截断过长信息
-                    "samples": samples[:5] # 最多取5个
+                    "samples": samples[:50] # 增加到50个样本，满足"完整信息"需求
                 })
 
         # 生成报告文本（通过场景也打印关键统计信息）

@@ -1,4 +1,5 @@
 import os
+from datetime import date, datetime
 import pendulum
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -50,6 +51,30 @@ with DAG(
     doc_md=__doc__,
 ) as dag:
 
+    # 伪代码：安全解析时间
+    # 1. 判空，空值直接报错。
+    # 2. 如果是字符串，使用 pendulum.parse 解析。
+    # 3. 如果是 datetime/pendulum 对象，直接 instance。
+    # 4. 如果是 date，只取日期并补零时分秒。
+    # 5. 统一补全为 UTC 时区，类型不符则抛出异常。
+    def _to_pendulum_utc(value, label):
+        if value is None:
+            raise ValueError(f"{label} 为空，无法解析。")
+        if isinstance(value, str):
+            parsed = pendulum.parse(value)
+        elif isinstance(value, pendulum.DateTime):
+            parsed = value
+        elif isinstance(value, datetime):
+            parsed = pendulum.instance(value)
+        elif isinstance(value, date):
+            parsed = pendulum.datetime(value.year, value.month, value.day)
+        else:
+            raise ValueError(f"{label} 类型不支持: {type(value)}")
+
+        if parsed.tzinfo is None:
+            parsed = pendulum.instance(parsed, tz="UTC")
+        return parsed
+
     def _check_staleness(**context):
         """
         检查数据流的滞后状态 (Health Check)。
@@ -66,10 +91,11 @@ with DAG(
         if watermark_time_str:
             try:
                 # 尝试解析时间 (处理各类 ISO 格式)
-                watermark_time = pendulum.parse(watermark_time_str)
-                # 确保时区感知 (通常存储为 UTC，若无时区则假设为 UTC)
-                if watermark_time.tzinfo is None:
-                    watermark_time = pendulum.instance(watermark_time, tz="UTC")
+                # watermark_time = pendulum.parse(watermark_time_str)
+                # # 确保时区感知 (通常存储为 UTC，若无时区则假设为 UTC)
+                # if watermark_time.tzinfo is None:
+                #     watermark_time = pendulum.instance(watermark_time, tz="UTC")
+                watermark_time = _to_pendulum_utc(watermark_time_str, "Cactus 水位线")
                 
                 gap_hours = (now - watermark_time).total_hours()
                 
@@ -82,9 +108,10 @@ with DAG(
                     db_max_time = hook.get_first(sql)[0]
                     
                     if db_max_time:
-                        db_max_time = pendulum.instance(db_max_time)
-                        if db_max_time.tzinfo is None:
-                            db_max_time = pendulum.instance(db_max_time, tz="UTC")
+                        # db_max_time = pendulum.instance(db_max_time)
+                        # if db_max_time.tzinfo is None:
+                        #     db_max_time = pendulum.instance(db_max_time, tz="UTC")
+                        db_max_time = _to_pendulum_utc(db_max_time, "Cactus DB 水位")
                             
                         if db_max_time > watermark_time:
                             errors.append(
