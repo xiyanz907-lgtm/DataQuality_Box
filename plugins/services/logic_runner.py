@@ -3,6 +3,7 @@ import importlib
 import logging
 import traceback
 import os
+import pendulum
 from datetime import datetime, timedelta
 from services.datasource import get_datasource
 from services.config import get_table_config
@@ -11,15 +12,42 @@ logger = logging.getLogger("airflow.task")
 
 class LogicRunner:
     def __init__(self, cactus_conn_id, ngen_conn_id):
-        """Initialize data sources.
+        """初始化数据源。
 
         Args:
-            cactus_conn_id: Airflow connection id for KPI (cactus) database.
-            ngen_conn_id: Airflow connection id for nGen database.
+            cactus_conn_id: KPI (cactus) 数据库的 Airflow 连接 ID。
+            ngen_conn_id: nGen 数据库的 Airflow 连接 ID。
         """
         # 数据源工厂：目前仅 mysql，后续可扩展
         self.ds_kpi = get_datasource("mysql", cactus_conn_id)
         self.ds_ngen = get_datasource("mysql", ngen_conn_id)
+
+    def _get_local_time_range_sql(self, date_filter_utc, col_name="On_Chasis_Datetime"):
+        """
+        根据 UTC 日期生成对应 Local Time 的 SQL 过滤条件。
+        解决 nGen (Local Time) 与 Cactus (UTC) 的时区对齐问题。
+        """
+        try:
+            site_tz = os.getenv("SITE_TIMEZONE", "UTC")
+            # 构造 UTC 时间范围
+            utc_start = pendulum.from_format(date_filter_utc, "YYYY-MM-DD", tz="UTC").start_of("day")
+            utc_end = pendulum.from_format(date_filter_utc, "YYYY-MM-DD", tz="UTC").end_of("day")
+            
+            # 转换为 Site Local Time
+            local_start = utc_start.in_timezone(site_tz)
+            local_end = utc_end.in_timezone(site_tz)
+            
+            # 格式化为 SQL 字符串 (假设 nGen 存储格式可被 STR_TO_DATE 解析)
+            fmt = "%Y-%m-%d %H:%M:%S"
+            s_str = local_start.strftime(fmt)
+            e_str = local_end.strftime(fmt)
+            
+            # 构造 BETWEEN 子句
+            # nGen 字段通常是字符串 'DD/MM/YYYY HH:MM:SS'
+            return f"STR_TO_DATE({col_name}, '%d/%m/%Y %H:%M:%S') BETWEEN '{s_str}' AND '{e_str}'"
+        except Exception as e:
+            logger.error(f"时区转换失败: {e}. 回退到简单日期匹配。")
+            return f"STR_TO_DATE({col_name}, '%d/%m/%Y') = STR_TO_DATE('{date_filter_utc}', '%Y-%m-%d')"
 
     def get_id_boundaries(self, table_name, date_filter):
         """获取指定日期 nGen 数据的 ID 范围 (Min/Max ID)。
@@ -53,12 +81,13 @@ class LogicRunner:
         id_col = config.get("reference_id_col", "id") 
         
         # 构造 SQL
-        # 注意：这里假设 nGen 的日期格式是 DD/MM/YYYY，需与 run_checks 保持一致
-        # 如果配置里有 date_fmt 更好，但暂且硬编码兼容现有逻辑
+        # 修正: 使用时区转换后的时间范围，而非直接匹配日期字符串
+        where_clause = self._get_local_time_range_sql(date_filter, "On_Chasis_Datetime")
+        
         sql = f"""
             SELECT MIN({id_col}), MAX({id_col})
             FROM hutchisonports.{ref_table}
-            WHERE STR_TO_DATE(On_Chasis_Datetime, '%d/%m/%Y') = STR_TO_DATE('{date_filter}', '%Y-%m-%d')
+            WHERE {where_clause}
             AND Tractor_No LIKE 'AT%'
         """
         
@@ -129,9 +158,9 @@ class LogicRunner:
                 logger.info(f"使用 ID 分片模式: {where_clause}")
             else:
                 # 策略: 业务日期模式 (针对旧数据更新)
-                # 使用日期过滤，覆盖全天的所有数据。
-                where_clause = f"STR_TO_DATE(On_Chasis_Datetime, '%d/%m/%Y') = STR_TO_DATE('{date_filter}', '%Y-%m-%d')"
-                logger.info(f"使用日期过滤模式: {where_clause}")
+                # 修正: 考虑到时区差异，将 UTC Date 转换为 Local Time Range
+                where_clause = self._get_local_time_range_sql(date_filter, "On_Chasis_Datetime")
+                logger.info(f"使用日期过滤模式 (TZ Adjusted): {where_clause}")
 
             sql_ngen = f"""
                 SELECT {target_key}, On_Chasis_Datetime, Off_Chasis_Datetime
