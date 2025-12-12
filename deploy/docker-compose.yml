@@ -1,0 +1,202 @@
+x-airflow-common: &airflow-common
+  image: ${AIRFLOW_IMAGE:-airflow-custom:latest}  # 使用预构建的镜像
+  environment: &airflow-common-env
+    # 核心配置
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${POSTGRES_PASSWORD:-airflow}@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    
+    # 性能优化配置
+    AIRFLOW__CORE__PARALLELISM: ${AIRFLOW_PARALLELISM:-12}
+    AIRFLOW__CORE__DAG_CONCURRENCY: ${AIRFLOW_DAG_CONCURRENCY:-6}
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: ${AIRFLOW_MAX_ACTIVE_RUNS:-2}
+    AIRFLOW__SCHEDULER__MAX_THREADS: 2
+    
+    # 日志配置
+    AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+    AIRFLOW__LOGGING__DAG_PROCESSOR_MANAGER_LOG_LOCATION: /opt/airflow/logs/dag_processor_manager/dag_processor_manager.log
+    
+    # Web服务器配置
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    AIRFLOW__WEBSERVER__BASE_URL: ${AIRFLOW_BASE_URL:-http://localhost:8080}
+    
+    # 外部服务连接
+    MYSQL_HOST: ${MYSQL_HOST}
+    MYSQL_PORT: ${MYSQL_PORT}
+    MYSQL_USER: ${MYSQL_USER}
+    MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    MYSQL_DATABASE: ${MYSQL_DATABASE}
+    
+    INFLUXDB_HOST: ${INFLUXDB_HOST}
+    INFLUXDB_PORT: ${INFLUXDB_PORT}
+    INFLUXDB_TOKEN: ${INFLUXDB_TOKEN}
+    INFLUXDB_ORG: ${INFLUXDB_ORG}
+    INFLUXDB_BUCKET: ${INFLUXDB_BUCKET}
+    
+    MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+    MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+    MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - ./config:/opt/airflow/config
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins
+        exec /entrypoint airflow db migrate
+    environment:
+      <<: *airflow-common-env
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - "${AIRFLOW_WEBSERVER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 2G
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 6G
+        reservations:
+          cpus: '1'
+          memory: 3G
+
+  airflow-create-user:
+    <<: *airflow-common
+    container_name: airflow-create-user
+    command:
+      - bash
+      - -c
+      - |
+        airflow users create \
+          --username ${AIRFLOW_ADMIN_USER:-admin} \
+          --password ${AIRFLOW_ADMIN_PASSWORD:-admin} \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email ${AIRFLOW_ADMIN_EMAIL:-admin@example.com} || echo "User already exists"
+        
+        if [ -f /opt/airflow/config/connections.json ]; then
+          python3 << 'EOF'
+        import json
+        import os
+        from airflow.models import Connection
+        from airflow import settings
+
+        with open('/opt/airflow/config/connections.json', 'r') as f:
+            connections = json.load(f)
+
+        session = settings.Session()
+        for conn_id, conn_data in connections.items():
+            # 替换环境变量
+            for key in ['host', 'schema', 'login', 'password', 'extra']:
+                if key in conn_data and isinstance(conn_data[key], str):
+                    for env_key, env_val in os.environ.items():
+                        conn_data[key] = conn_data[key].replace(f'${{{env_key}}}', env_val)
+            
+            existing = session.query(Connection).filter(Connection.conn_id == conn_id).first()
+            if existing:
+                session.delete(existing)
+            
+            conn = Connection(
+                conn_id=conn_id,
+                conn_type=conn_data.get('conn_type'),
+                host=conn_data.get('host'),
+                schema=conn_data.get('schema'),
+                login=conn_data.get('login'),
+                password=conn_data.get('password'),
+                port=conn_data.get('port'),
+                extra=conn_data.get('extra')
+            )
+            session.add(conn)
+        
+        session.commit()
+        print("Connections imported successfully")
+        EOF
+        fi
+    environment:
+      <<: *airflow-common-env
+    restart: "no"
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+    driver: dscp
