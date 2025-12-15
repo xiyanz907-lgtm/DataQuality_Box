@@ -5,6 +5,10 @@ import os
 # 2. 支持通过环境变量覆盖阈值，保持现有默认行为。
 # 3. LogicRunner 会读取此配置并与规则模块内的 CONFIG 合并（后者可保留为兜底）。
 
+# 数据库连接 ID 配置 (Single Source of Truth)
+CONN_ID_NGEN = "ngen_mysql_conn"
+CONN_ID_CACTUS = "cactus_mysql_conn"
+
 # 表级配置中心（可按需扩展新表）
 TABLE_CONFIGS = {
     "cnt_cycles": {
@@ -43,4 +47,3 @@ def get_table_config(table_name: str) -> dict:
     """返回表级配置副本，未配置返回空 dict。"""
     cfg = TABLE_CONFIGS.get(table_name, {})
     return dict(cfg)
-

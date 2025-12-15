@@ -5,6 +5,7 @@ from airflow import DAG
 from airflow.decorators import task
 from airflow.utils.dates import days_ago
 from airflow.utils.email import send_email
+from services.config import CONN_ID_CACTUS, CONN_ID_NGEN
 
 # 尝试导入 ReconciliationRunner
 # 假设 plugins 目录已添加到 PYTHONPATH
@@ -34,7 +35,7 @@ with DAG(
     start_date=days_ago(1),
     catchup=False,
     max_active_runs=1, # 防止并发冲突
-    max_active_tasks=5, # 控制同时运行的 Worker 数量
+    max_active_tasks=1, # [修改] 强制串行执行，避免 MySQL 大事务更新时的锁等待超时 (Lock Wait Timeout)
     tags=['worker', 'reconciliation']
 ) as dag:
 
@@ -59,7 +60,7 @@ with DAG(
         logging.info(f"Total vehicles: {len(vehicle_list)}. Created {len(batches)} batches.")
         return batches
 
-    @task(max_active_ti_per_dag=5) # 也可以在 Task 级别控制并发
+    @task(max_active_tis_per_dag=1) # [修改] 同步限制 Task 级并发度
     def execute_reconciliation(vehicle_batch: list, **context):
         """
         Step 2: 执行单个 Batch 的回填逻辑
@@ -77,18 +78,31 @@ with DAG(
         
         # 转换时间字符串为 datetime 对象
         # 兼容多种格式，这里使用 pandas 解析比较稳健
+        # 默认值使用 1970-01-01 而不是 datetime.min (0001-01-01) 防止 timedelta 溢出
+        DEFAULT_MIN_DATE = datetime(1970, 1, 1)
+        DEFAULT_MAX_DATE = datetime(2099, 12, 31)
+
         try:
-            start_dt = pd.to_datetime(start_str).to_pydatetime() if start_str else datetime.min
-            end_dt = pd.to_datetime(end_str).to_pydatetime() if end_str else datetime.max
+            # 检查空字符串
+            if start_str and start_str.strip():
+                start_dt = pd.to_datetime(start_str).to_pydatetime()
+            else:
+                start_dt = DEFAULT_MIN_DATE
+
+            if end_str and end_str.strip():
+                end_dt = pd.to_datetime(end_str).to_pydatetime()
+            else:
+                end_dt = DEFAULT_MAX_DATE
+                
         except Exception as e:
             logging.error(f"Failed to parse date range: {e}")
             raise e
 
         # 实例化 Runner
-        # 使用用户指定的 Connection IDs
+        # 使用统一配置的 Connection IDs
         runner = ReconciliationRunner(
-            cactus_conn_id='cactus_mysql_conn', 
-            ngen_conn_id='ngen_mysql_conn'
+            cactus_conn_id=CONN_ID_CACTUS, 
+            ngen_conn_id=CONN_ID_NGEN
         )
         
         try:
@@ -111,8 +125,14 @@ with DAG(
         """
         total_vehicles = 0
         total_updated = 0
-        total_inserted = 0
         failed_batches = 0
+        
+        # DQ 汇总
+        total_matched_pairs = 0
+        total_perfect = 0
+        time_diff_sum = 0.0
+        cntr_stats_agg = {}
+        all_errors = []
         
         if not results:
             logging.info("No results to summarize.")
@@ -124,11 +144,41 @@ with DAG(
                 continue
                 
             total_updated += res.get('updated', 0)
-            total_inserted += res.get('inserted', 0)
             total_vehicles += res.get('batch_size', 0)
             
             if res.get('status') != 'SUCCESS':
                 failed_batches += 1
+                
+            # 汇总 DQ Report
+            dq = res.get('dq_report', {})
+            if dq:
+                # 注意: metrics.py 返回的 key 是 total_count, consistency_stats
+                # 我们需要适配一下
+                matched_cnt = dq.get('total_count', 0)
+                total_matched_pairs += matched_cnt
+                total_perfect += dq.get('perfect_count', 0)
+                
+                # 加权平均时间差 (简单累加总秒数，最后除以总数)
+                avg_diff = dq.get('avg_time_diff_sec', 0)
+                time_diff_sum += avg_diff * matched_cnt
+                
+                # 累加箱号状态
+                stats = dq.get('consistency_stats', {})
+                for k, v in stats.items():
+                    cntr_stats_agg[k] = cntr_stats_agg.get(k, 0) + v
+                    
+                # 收集异常 (限制总数以免爆内存/邮件)
+                if len(all_errors) < 100:
+                    all_errors.extend(dq.get('errors', []))
+        
+        # 计算全局平均
+        global_avg_diff = 0.0
+        if total_matched_pairs > 0:
+            global_avg_diff = time_diff_sum / total_matched_pairs
+            
+        perfect_rate = 0.0
+        if total_matched_pairs > 0:
+            perfect_rate = (total_perfect / total_matched_pairs) * 100
         
         summary_lines = [
             "Reconciliation Worker Report",
@@ -136,10 +186,29 @@ with DAG(
             f"Execution Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"Total Vehicles Processed: {total_vehicles}",
             f"Total Records Updated: {total_updated}",
-            f"Total Records Inserted: {total_inserted}",
             f"Failed Batches: {failed_batches}",
-            "============================"
+            "",
+            "Data Quality Metrics (Matched Pairs)",
+            "----------------------------",
+            f"Total Matched Pairs: {total_matched_pairs}",
+            f"Perfect Matches: {total_perfect} ({perfect_rate:.2f}%)",
+            f"Avg Time Diff: {global_avg_diff:.2f} sec",
+            "",
+            "Container Consistency Stats:",
+            *[f"  - {k}: {v}" for k, v in cntr_stats_agg.items()],
+            "",
+            "Top Errors (Sample):",
+            "----------------------------"
         ]
+        
+        # 格式化错误列表
+        for err in all_errors[:20]: # 只展示前20个
+             summary_lines.append(f"ID:{err.get('id')} | Veh:{err.get('vehicle')} | Issue:{err.get('issue')}")
+             summary_lines.append(f"  nGen: {err.get('ngen_cnts')}")
+             summary_lines.append(f"  Cactus: {err.get('cactus_cnts')}")
+             summary_lines.append("-")
+
+        summary_lines.append("============================")
         
         summary_text = "\n".join(summary_lines)
         logging.info(summary_text)
@@ -167,4 +236,3 @@ with DAG(
     
     # 3. 汇总结果 (Reducer)
     summarize_and_notify(execution_results)
-
