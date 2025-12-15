@@ -17,7 +17,9 @@ SCHEDULE = "0 8,20 * * *"  # 每天早晚 8:00 和 20:00 执行
 
 # 变量名称 (Variable Names)
 VAR_NGEN_ID = "watermark_cnt_cycles_ngen_id"
-VAR_CACTUS_TIME = "watermark_cnt_cycles_cactus_time"
+# VAR_CACTUS_TIME = "watermark_cnt_cycles_cactus_time"  # 已废弃：历史水位线变量，保留注释避免误用
+# 新变量：统一使用 last_modified 水位线（必须配置）
+VAR_CACTUS_TIME_NEW = "watermark_cactus_last_modified"
 
 # 阈值配置 (Thresholds)
 THRESHOLD_NGEN_HOURS = 30   # nGen (T+1) 容忍 30小时
@@ -86,7 +88,10 @@ with DAG(
         # ---------------------------------------------------------
         # 1. 检查 Cactus (基于时间 / Time-based)
         # ---------------------------------------------------------
-        watermark_time_str = Variable.get(VAR_CACTUS_TIME, default_var=None)
+        # 伪代码：仅使用新变量读取水位线
+        # 1. 获取 VAR_CACTUS_TIME_NEW。
+        # 2. 若为空则报错，提示必须配置新变量。
+        watermark_time_str = Variable.get(VAR_CACTUS_TIME_NEW, default_var=None)
         
         if watermark_time_str:
             try:
@@ -133,7 +138,9 @@ with DAG(
             except Exception as e:
                 errors.append(f"[错误/ERROR] Cactus 检查失败 (Check Failed): {str(e)}")
         else:
-            errors.append(f"[错误/ERROR] 变量 {VAR_CACTUS_TIME} 未找到 (Variable Not Found)。")
+            errors.append(
+                f"[错误/ERROR] 变量未找到 (Variable Not Found): {VAR_CACTUS_TIME_NEW}。请在 Airflow Variables 中配置。"
+            )
 
         # ---------------------------------------------------------
         # 2. 检查 nGen (基于 ID / ID-based)
