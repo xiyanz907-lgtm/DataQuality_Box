@@ -146,7 +146,7 @@ class ReconciliationRunner:
         hook = MySqlHook(mysql_conn_id=self.ngen_conn_id)
         
         # [变更] 扩大时间窗口 +/- 3小时，以支持宽松匹配
-        buffer_hours = 3
+        buffer_hours = 4
         
         # 获取时区配置 (优先使用 SITE_TIMEZONE，默认 Asia/Hong_Kong)
         # 注意: nGen 数据库存储的是 Local Time (dd/mm/yyyy)，而 start_dt/end_dt 是 UTC。
@@ -186,28 +186,25 @@ class ReconciliationRunner:
         for v in vehicle_list:
             v_str = str(v).strip()
             # 尝试提取数字
-            # 假设车号中包含数字，提取最后的一组连续数字? 
-            # 或者简单去除所有非数字字符
             digits = re.sub(r'\D', '', v_str)
             
             if digits:
-                # 原始输入也加入
+                # 原始输入
                 search_vehicles.add(v_str)
-                # 变体 1: AT + 2位补0 (AT04)
+                # 变体
                 search_vehicles.add(f"AT{digits.zfill(2)}")
-                # 变体 2: AT + 3位补0 (AT004)
                 search_vehicles.add(f"AT{digits.zfill(3)}")
-                # 变体 3: 纯数字 (可选，以防万一)
-                # search_vehicles.add(digits)
             else:
-                # 如果没提取到数字，就只用原始字符串
                 search_vehicles.add(v_str)
 
         vehicles_str = ",".join([f"'{v}'" for v in search_vehicles])
         
-        # [最后修正] 放弃 SQL STR_TO_DATE，改用 Python 端过滤
-        # 经过多次验证，SQL 端日期解析极其不稳定，而 Python 端解析是成功的。
-        # 为了保证数据完整性，我们只在 SQL 过滤车号，然后拉取到内存进行精确的时间过滤。
+        # [修正] 将时间过滤下推到 SQL (Server-side Filter)
+        start_str = search_start_naive.strftime('%d/%m/%Y %H:%M:%S')
+        end_str = search_end_naive.strftime('%d/%m/%Y %H:%M:%S')
+        
+        self.logger.info(f"nGen Search Params - Vehicles: {list(search_vehicles)}")
+        self.logger.info(f"nGen Search Params - Local Time Range: {start_str} to {end_str}")
         
         sql = f"""
             SELECT 
@@ -219,6 +216,8 @@ class ReconciliationRunner:
                 Cntr_Length_In_Feet
             FROM ngen
             WHERE TRIM(Tractor_No) IN ({vehicles_str})
+            AND STR_TO_DATE(On_Chasis_Datetime, '%d/%m/%Y %H:%i:%s') >= STR_TO_DATE('{start_str}', '%d/%m/%Y %H:%i:%s')
+            AND STR_TO_DATE(On_Chasis_Datetime, '%d/%m/%Y %H:%i:%s') <= STR_TO_DATE('{end_str}', '%d/%m/%Y %H:%i:%s')
         """
         
         self.logger.info(f"Executing nGen SQL (Python Filter Mode): {sql}")
