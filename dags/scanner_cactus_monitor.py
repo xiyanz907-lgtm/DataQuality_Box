@@ -45,7 +45,7 @@ with DAG(
         # 1. 获取水位线
         watermark_key = "watermark_cactus_last_modified"
         # 默认值: '2024-01-01 00:00:00'
-        last_watermark_str = Variable.get(watermark_key, default_var='2024-01-01 00:00:00')
+        last_watermark_str = Variable.get(watermark_key, default_var='2025-11-01 00:00:00')
         logger.info(f"Current Watermark: {last_watermark_str}")
 
         # 2. 连接数据库
@@ -53,7 +53,7 @@ with DAG(
         
         # 3. 检查是否有新数据 (Cold Start / Batch Limit 策略)
         # 限制每次处理的时间窗口: 4 小时
-        batch_limit_hours = 4
+        batch_limit_hours = 8
         
         # 查询全局 Max last_modified
         # 假设 last_modified 是 TIMESTAMP 或 DATETIME 类型

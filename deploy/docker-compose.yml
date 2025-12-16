@@ -29,7 +29,7 @@ services:
   # Airflow
   airflow:
     build: .  
-    command: bash -c "airflow db migrate && (airflow scheduler & airflow webserver)"
+    command: bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_ADMIN_USER} --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL} --password ${AIRFLOW_ADMIN_PASSWORD} 2>/dev/null || true && (airflow scheduler & airflow webserver)"
     environment:
       - TZ=${SITE_TIMEZONE}  #挂载宿主机时间
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
