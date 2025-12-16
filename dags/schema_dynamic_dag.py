@@ -107,6 +107,7 @@ with DAG(
     default_args=default_args,
     schedule='*/30 * * * *',
     catchup=False,
+    is_paused_upon_creation=True,
     tags=['quality', 'schema', 'dynamic']
 ) as dag:
 

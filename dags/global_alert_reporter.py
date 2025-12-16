@@ -33,6 +33,7 @@ default_args = {
     catchup=False,
     tags=["monitor", "alert"],
     default_args=default_args,
+    is_paused_upon_creation=False,
 )
 def global_alert_reporter():
 

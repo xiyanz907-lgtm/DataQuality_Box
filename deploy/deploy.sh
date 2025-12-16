@@ -76,7 +76,8 @@ echo "等待服务启动..."
 echo -n "进度: "
 
 for i in {1..30}; do
-    if docker exec airflow-webserver curl -sf http://localhost:8080/health &> /dev/null; then
+    if docker compose exec -T airflow curl -sf http://localhost:8080/health &> /dev/null || \
+       docker-compose exec -T airflow curl -sf http://localhost:8080/health &> /dev/null; then
         echo -e "\n${GREEN}✓ Airflow服务启动成功！${NC}"
         break
     fi
@@ -95,9 +96,9 @@ echo "=========================================="
 echo -e "${GREEN}✅ 部署完成！${NC}"
 echo "=========================================="
 echo ""
-echo "📊 Airflow Web UI:  http://localhost:8080"
-echo "👤 用户名:          admin"
-echo "🔑 密码:            admin"
+echo "📊 Airflow Web UI:  http://localhost:8081"
+echo "👤 用户名:          ${AIRFLOW_ADMIN_USER}"
+echo "🔑 密码:            ${AIRFLOW_ADMIN_PASSWORD}"
 echo ""
 echo "📝 常用命令:"
 echo "  - 查看日志:       docker compose logs -f"

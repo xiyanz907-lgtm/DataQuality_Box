@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 import pandas as pd
+import os
 from airflow import DAG
 from airflow.decorators import task
 from airflow.utils.dates import days_ago
@@ -213,15 +214,25 @@ with DAG(
         summary_text = "\n".join(summary_lines)
         logging.info(summary_text)
         
-        # 简单的邮件通知逻辑 (如果 Airflow SMTP 配置就绪)
-        # try:
-        #     send_email(
-        #         to=['data-team@example.com'],
-        #         subject=f"Reconciliation Report - {datetime.now().strftime('%Y-%m-%d')}",
-        #         html_content=summary_text.replace('\n', '<br>')
-        #     )
-        # except Exception as e:
-        #     logging.warning(f"Could not send email: {e}")
+        # 简单的邮件通知逻辑
+        to_email = os.getenv("ALERT_EMAIL_TO")
+        if to_email:
+            try:
+                # 构造 HTML 内容 (简单的换行和加粗)
+                html_content = summary_text.replace('\n', '<br>')
+                html_content = html_content.replace('Top Errors', '<b>Top Errors</b>')
+                html_content = html_content.replace('Data Quality Metrics', '<b>Data Quality Metrics</b>')
+                
+                send_email(
+                    to=[to_email],
+                    subject=f"Reconciliation Worker Report - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                    html_content=html_content
+                )
+                logging.info(f"Email sent to {to_email}")
+            except Exception as e:
+                logging.warning(f"Could not send email: {e}")
+        else:
+            logging.warning("ALERT_EMAIL_TO not set, skipping email.")
             
         return summary_text
 
