@@ -102,23 +102,23 @@ def _validate_wrapper(table_name, schema_obj, task_id, batch_size, **context):
 # ======================================================
 # 4. 动态生成 DAG
 # ======================================================
-with DAG(
-    'schema_quality_check_dynamic',
-    default_args=default_args,
-    schedule='*/30 * * * *',
-    catchup=False,
-    is_paused_upon_creation=True,
-    tags=['quality', 'schema', 'dynamic']
-) as dag:
+# with DAG(
+#     'schema_quality_check_dynamic',
+#     default_args=default_args,
+#     schedule='*/30 * * * *',
+#     catchup=False,
+#     is_paused_upon_creation=True,
+#     tags=['quality', 'schema', 'dynamic']
+# ) as dag:
 
-    for config in TABLES_TO_CHECK:
-        PythonOperator(
-            task_id=f"check_{config['task_id']}", 
-            python_callable=_validate_wrapper,
-            op_kwargs={
-                "table_name": config["table_name"],
-                "schema_obj": config["schema_obj"],
-                "task_id": config["task_id"],
-                "batch_size": config.get("batch_size", int(os.getenv("BATCH_SIZE", 50000)))
-            }
-        )
+#     for config in TABLES_TO_CHECK:
+#         PythonOperator(
+#             task_id=f"check_{config['task_id']}", 
+#             python_callable=_validate_wrapper,
+#             op_kwargs={
+#                 "table_name": config["table_name"],
+#                 "schema_obj": config["schema_obj"],
+#                 "task_id": config["task_id"],
+#                 "batch_size": config.get("batch_size", int(os.getenv("BATCH_SIZE", 50000)))
+#             }
+#         )
