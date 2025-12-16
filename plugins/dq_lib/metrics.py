@@ -44,7 +44,7 @@ class MetricsEngine:
                     return {}
 
             # 计算 Time Diff (seconds)
-            # 注意: matched=2 (Target Only) 的行 real_end_time 为 null，diff 为 null
+            # 注意: matched_status=2 (Target Only) 的行 real_end_time 为 null，diff 为 null
             df_calcs = df_matched.with_columns([
                 (pl.col("real_end_time") - pl.col("_time_cleaned")).dt.total_seconds().abs().alias("time_diff_sec"),
             ])
@@ -56,7 +56,7 @@ class MetricsEngine:
             # - 计算交集
             
             # 辅助: 处理 null 列表
-            # 如果 matched=2, nGen 列可能为 null
+            # 如果 matched_status=2, nGen 列可能为 null
             
             df_calcs = df_calcs.with_columns([
                 pl.concat_list([
@@ -89,9 +89,9 @@ class MetricsEngine:
             # 定义状态:
             # - MATCH: 交集 > 0
             # - MISMATCH: 交集 = 0 且 两边都不为空
-            # - NULL_NGEN: nGen 为空 (且 matched != 2)
+            # - NULL_NGEN: nGen 为空 (且 matched_status != 2)
             # - NULL_CACTUS: Cactus 为空
-            # - TARGET_ONLY: matched=2
+            # - TARGET_ONLY: matched_status=2
             
             def get_status_expr():
                 return (
@@ -117,7 +117,7 @@ class MetricsEngine:
             total_count = df_calcs.height
             perfect_count = df_calcs.filter(pl.col("is_perfect")).height
             
-            # 平均时间差 (只统计 matched=1/4 的)
+            # 平均时间差 (只统计 matched_status=1/4 的)
             avg_diff = df_calcs.filter(pl.col("matched_status").is_in([1, 4])) \
                                .select(pl.col("time_diff_sec").mean()).item()
             

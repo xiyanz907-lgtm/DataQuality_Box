@@ -169,7 +169,7 @@ class ReconciliationEngine:
            - join_asof, tolerance=5m
         3. Level 2: 宽松匹配 (Loose Match) - 针对 Level 1 未匹配的数据
            - join (on vehicle_id), time_diff <= 3h, container_check (any match)
-        4. 识别 Cactus Only (matched=2) 和 Orphan nGen (Log only)
+        4. 识别 Cactus Only (sync_status=2) 和 Orphan nGen (Log only)
 
         Args:
             df_ngen_agg: nGen 聚合后的 DataFrame (Left)
@@ -177,7 +177,7 @@ class ReconciliationEngine:
 
         Returns:
             dict: {
-                'matched': pl.DataFrame (包含 matched=1 和 matched=2/4 的记录),
+                'matched': pl.DataFrame (包含 matched_status=1 和 matched_status=2/4 的记录),
                 'orphaned_ngen': pl.DataFrame (仅做记录)
             }
         """
@@ -338,9 +338,9 @@ class ReconciliationEngine:
             all_matched_cactus_ids = df_matched_all.select("id").unique()
             df_cactus_unmatched = df_cactus_clean.join(all_matched_cactus_ids, on="id", how="anti")
             
-            # 将 Cactus Only 标记为 matched=2 (Target Only)
+            # 将 Cactus Only 标记为 sync_status=2 (Target Only)
             # 为了返回统一格式，这里需要构造一个 DataFrame，包含 update 所需的列
-            # 对于 matched=2，我们需要 update set matched=2。
+            # 对于 sync_status=2，我们需要 update set sync_status=2。
             # 它没有 cycle_id (nGen ID)，所以 cycle_id 为 null
             
             df_cactus_only_update = df_cactus_unmatched.select([

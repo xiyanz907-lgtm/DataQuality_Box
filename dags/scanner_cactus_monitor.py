@@ -38,7 +38,7 @@ with DAG(
         检查 Cactus (cnt_cycles) 表是否有新数据或更新。
         条件: 
         1. last_modified > Watermark
-        2. matched != 1 (及 4)
+        2. sync_status != 1 (及 4)
         """
         logger = logging.getLogger("airflow.task")
         
@@ -94,18 +94,18 @@ with DAG(
         logger.info(f"Target Watermark for this run: {target_watermark_str}")
 
         # 5. 查询受影响的数据详情
-        # 筛选条件: last_modified 在窗口内 AND matched NOT IN (1, 4)
-        # matched=1 (Strict), matched=4 (Loose) 都是已完全匹配的状态，无需重试
-        # matched=0 (New), matched=2 (Target Only), matched=3 (Insert-Deprecated) 需要处理
+        # 筛选条件: last_modified 在窗口内 AND sync_status NOT IN (1, 4)
+        # sync_status=1 (Strict), sync_status=4 (Loose) 都是已完全匹配的状态，无需重试
+        # sync_status=0 (New), sync_status=2 (Target Only), sync_status=3 (Insert-Deprecated) 需要处理
         # 注意: 防止死循环 - 只有当 last_modified 真正更新时才处理。
-        # MySQL 特性: 如果 update set matched=2 where matched=2，last_modified 不会变。
+        # MySQL 特性: 如果 update set sync_status=2 where sync_status=2，last_modified 不会变。
         
         vehicles_sql = f"""
             SELECT DISTINCT vehicleId 
             FROM cnt_cycles 
             WHERE last_modified_timestamp > '{last_watermark_str}' 
             AND last_modified_timestamp <= '{target_watermark_str}'
-            AND (matched IS NULL OR matched NOT IN (1, 4))
+            AND (sync_status IS NULL OR sync_status NOT IN (1, 4))
         """
         
         # 获取时间范围 (_time) 用于 Worker 拉取数据
@@ -126,7 +126,7 @@ with DAG(
         context['ti'].xcom_push(key='new_watermark', value=target_watermark_str)
 
         if not vehicle_list:
-            logger.info("Watermark advanced, but no vehicles found needing reconciliation (maybe all matched=1?).")
+            logger.info("Watermark advanced, but no vehicles found needing reconciliation (maybe all sync_status=1?).")
             return 'empty_batch'
         else:
             df_range = hook.get_pandas_df(range_sql)

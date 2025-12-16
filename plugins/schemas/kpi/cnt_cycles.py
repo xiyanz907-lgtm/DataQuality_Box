@@ -21,7 +21,7 @@ CntCyclesSchema = pa.DataFrameSchema(
         # # === 状态/标志位  ===
         # "haveDeliver": pa.Column(int, checks=pa.Check.isin([0, 1]), nullable=True),
         # "haveRevieve": pa.Column(int, checks=pa.Check.isin([0, 1]), nullable=True),
-        # "matched": pa.Column(int, checks=pa.Check.isin([0, 1]), nullable=True),
+        # "sync_status": pa.Column(int, checks=pa.Check.isin([0, 1, 2, 3, 4]), nullable=True),  # 已弃用 matched 字段
         
         # # === 箱号 ===
         # "cnt01": pa.Column(str, nullable=True),

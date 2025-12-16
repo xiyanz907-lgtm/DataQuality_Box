@@ -65,12 +65,12 @@ class ReconciliationRunner:
             # [新增] 防御性检查: 确保聚合结果不为空且包含 vehicle_id 列
             if df_ngen_agg.is_empty() or "vehicle_id" not in df_ngen_agg.columns:
                 self.logger.warning("nGen aggregation returned empty or invalid result. Skipping Cactus extraction.")
-                # 即使没有 nGen 数据，如果此调用是由 Cactus 触发的，我们也应该提取 Cactus 看看是否需要标记为 matched=2
+                # 即使没有 nGen 数据，如果此调用是由 Cactus 触发的，我们也应该提取 Cactus 看看是否需要标记为 sync_status=2
                 # 但如果 vehicle_list 是从 Cactus 来的，我们依然需要提取 Cactus 数据。
                 # 假设 vehicle_list 包含归一化后的 ID (例如从 Cactus 来的)
                 pass 
                 # 这里逻辑有点 tricky：如果 nGen 没数据，aggregat_ngen 返回空。
-                # 我们依然需要去查 Cactus，把这些车辆标记为 matched=2 (如果它们还没被标记)。
+                # 我们依然需要去查 Cactus，把这些车辆标记为 sync_status=2 (如果它们还没被标记)。
                 # 但 _extract_cactus_data 需要 vehicle_list。
                 # 如果 df_ngen_agg 为空，我们无法从 nGen 拿到 normalized list。
                 # **关键修正**: 我们应该直接使用传入的 vehicle_list 去查 Cactus，前提是传入的就是归一化的 ID。
@@ -282,7 +282,7 @@ class ReconciliationRunner:
 
     def _perform_updates(self, df: pl.DataFrame) -> int:
         """
-        更新匹配成功的记录：回填 cycleId (nGen ID) 和 matched=1，以及箱号 (从 list/str 转换回列)
+        更新匹配成功的记录：回填 cycleId (nGen ID) 和 sync_status=1，以及箱号 (从 list/str 转换回列)
         """
         hook = MySqlHook(mysql_conn_id=self.cactus_conn_id)
         
@@ -301,8 +301,8 @@ class ReconciliationRunner:
                 pass
             return None
 
-        # 应用转换 (仅当 matched != 2 时才需要处理箱号，因为 matched=2 没有 nGen 数据)
-        # 但为了代码统一，我们统一处理，反正 matched=2 时 ref_cnt_small_list 是 None
+        # 应用转换 (仅当 sync_status != 2 时才需要处理箱号，因为 sync_status=2 没有 nGen 数据)
+        # 但为了代码统一，我们统一处理，反正 sync_status=2 时 ref_cnt_small_list 是 None
         
         if 'ref_cnt_small_list' in df_pd.columns:
             df_pd['ref_cnt01'] = df_pd['ref_cnt_small_list'].apply(lambda x: get_safe(x, 0))
@@ -364,7 +364,7 @@ class ReconciliationRunner:
             # 这里的 LIMIT 0 只是为了复制列结构和类型
             create_temp_sql = """
             CREATE TEMPORARY TABLE IF NOT EXISTS tmp_cnt_cycles_updates 
-            AS SELECT id, cycleId, cnt01, cnt02, cnt03, matched FROM cnt_cycles LIMIT 0;
+            AS SELECT id, cycleId, cnt01, cnt02, cnt03, sync_status FROM cnt_cycles LIMIT 0;
             """
             cursor.execute(create_temp_sql)
             
@@ -373,7 +373,7 @@ class ReconciliationRunner:
             
             # 2. 批量插入数据到临时表 (Batch Insert is FAST)
             insert_temp_sql = """
-                INSERT INTO tmp_cnt_cycles_updates (id, cycleId, cnt01, cnt02, cnt03, matched)
+                INSERT INTO tmp_cnt_cycles_updates (id, cycleId, cnt01, cnt02, cnt03, sync_status)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """
             
@@ -392,7 +392,7 @@ class ReconciliationRunner:
                 
             # 3. 执行 Join Update
             # 利用主键/索引进行关联更新，效率极高
-            # 注意：如果 matched=2，cycleId/cnt 字段为 NULL，MySQL UPDATE SET x=NULL 是合法的。
+            # 注意：如果 sync_status=2，cycleId/cnt 字段为 NULL，MySQL UPDATE SET x=NULL 是合法的。
             join_update_sql = """
                 UPDATE cnt_cycles t
                 INNER JOIN tmp_cnt_cycles_updates s ON t.id = s.id
@@ -401,7 +401,7 @@ class ReconciliationRunner:
                     t.cnt01 = s.cnt01,
                     t.cnt02 = s.cnt02,
                     t.cnt03 = s.cnt03,
-                    t.matched = s.matched
+                    t.sync_status = s.sync_status
             """
             cursor.execute(join_update_sql)
             affected_rows = cursor.rowcount
