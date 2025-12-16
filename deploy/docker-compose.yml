@@ -28,7 +28,7 @@ services:
 
   # Airflow
   airflow:
-    build: .  
+    image: airflow-custom:2.7.1  # 使用预构建的镜像，不再 build
     command: bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_ADMIN_USER} --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL} --password ${AIRFLOW_ADMIN_PASSWORD} 2>/dev/null || true && (airflow scheduler & airflow webserver)"
     environment:
       - TZ=${SITE_TIMEZONE}  #挂载宿主机时间
@@ -81,4 +81,3 @@ services:
       resources:
         limits:
           memory: 4G
-
