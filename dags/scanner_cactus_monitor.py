@@ -30,6 +30,7 @@ with DAG(
     start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
     catchup=False,
     tags=['monitor', 'cactus', 'reconciliation'],
+    is_paused_upon_creation=False,
 ) as dag:
 
     def check_changes_and_branch(**context):

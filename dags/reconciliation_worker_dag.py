@@ -35,6 +35,7 @@ with DAG(
     schedule_interval=None, # 被动触发
     start_date=days_ago(1),
     catchup=False,
+    is_paused_upon_creation=False,
     max_active_runs=1, # 防止并发冲突
     max_active_tasks=1, # [修改] 强制串行执行，避免 MySQL 大事务更新时的锁等待超时 (Lock Wait Timeout)
     tags=['worker', 'reconciliation']

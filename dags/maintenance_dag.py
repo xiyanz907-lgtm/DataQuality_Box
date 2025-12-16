@@ -30,7 +30,7 @@ with DAG(
     catchup=False,
     tags=["maintenance", "cleanup"],
     doc_md=__doc__,
-    is_paused_upon_creation=True,
+    is_paused_upon_creation=False,
 ) as dag:
 
     @provide_session

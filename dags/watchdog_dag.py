@@ -51,6 +51,7 @@ with DAG(
     catchup=False,
     tags=["monitoring", "watchdog", "health_check"],
     doc_md=__doc__,
+    is_paused_upon_creation=False,
 ) as dag:
 
     # 伪代码：安全解析时间
