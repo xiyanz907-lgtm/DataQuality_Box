@@ -61,6 +61,8 @@ services:
            #  【注入数据库连接配置】
       - AIRFLOW_CONN_NGEN_MYSQL_CONN=mysql://${NGEN_USER}:${NGEN_PASSWORD}@${NGEN_HOST}:${NGEN_PORT}/${NGEN_DB_NAME}
       - AIRFLOW_CONN_CACTUS_MYSQL_CONN=mysql://${CACTUS_USER}:${CACTUS_PASSWORD}@${CACTUS_HOST}:${CACTUS_PORT}/${CACTUS_DB_NAME}
+      # DataLog (开发库) - 用于 DQ v1 (NGen vs DataLog) 对账
+      - AIRFLOW_CONN_DATALOG_MYSQL_CONN=mysql://${DATALOG_USER}:${DATALOG_PASSWORD}@${DATALOG_HOST}:${DATALOG_PORT}/${DATALOG_DB_NAME}
 
     volumes:
       # - /etc/localtime:/etc/localtime:ro 
