@@ -393,14 +393,16 @@ class ReconciliationRunner:
             # 3. 执行 Join Update
             # 利用主键/索引进行关联更新，效率极高
             # 注意：如果 sync_status=2，cycleId/cnt 字段为 NULL，MySQL UPDATE SET x=NULL 是合法的。
+            # [修改] 注释掉箱号覆盖逻辑，但保留 mismatch 对比记录用于 DQ 报告
             join_update_sql = """
                 UPDATE cnt_cycles t
                 INNER JOIN tmp_cnt_cycles_updates s ON t.id = s.id
                 SET 
                     t.cycleId = s.cycleId,
-                    t.cnt01 = s.cnt01,
-                    t.cnt02 = s.cnt02,
-                    t.cnt03 = s.cnt03,
+                    -- [注释] 箱号覆盖逻辑已禁用，但报告中仍保留箱号 mismatch 对比记录
+                    -- t.cnt01 = s.cnt01,
+                    -- t.cnt02 = s.cnt02,
+                    -- t.cnt03 = s.cnt03,
                     t.sync_status = s.sync_status
             """
             cursor.execute(join_update_sql)

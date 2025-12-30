@@ -64,6 +64,27 @@ services:
       # DataLog (开发库) - 用于 DQ v1 (NGen vs DataLog) 对账
       - AIRFLOW_CONN_DATALOG_MYSQL_CONN=mysql://${DATALOG_USER}:${DATALOG_PASSWORD}@${DATALOG_HOST}:${DATALOG_PORT}/${DATALOG_DB_NAME}
 
+           #  【注入 InfluxDB 配置 - Ground Truth Validation】
+      - INFLUX_URL=${INFLUX_URL}
+      - INFLUX_TOKEN=${INFLUX_TOKEN}
+      - INFLUX_ORG=${INFLUX_ORG}
+      - INFLUX_BUCKET=${INFLUX_BUCKET}
+      - INFLUX_TIMEOUT=${INFLUX_TIMEOUT}
+
+           #  【注入 Map API 配置 - Ground Truth Validation】
+      - MAP_API_URL=${MAP_API_URL}
+      - MAP_PORT=${MAP_PORT}
+      - MAP_API_TIMEOUT=${MAP_API_TIMEOUT}
+      - MAP_API_USE_CACHE=${MAP_API_USE_CACHE}
+
+           #  【注入 DQ 验证规则配置】
+      - MAX_SPEED_FOR_STATIONARY=${MAX_SPEED_FOR_STATIONARY}
+      - DQ_VEHICLE_SHARD_SIZE=${DQ_VEHICLE_SHARD_SIZE}
+      
+           #  【注入 Controller 冷启动配置】
+      - DATALOG_LOGIC_CHECK_START_DATE=${DATALOG_LOGIC_CHECK_START_DATE}
+      - DATALOG_NGEN_CHECK_START_DATE=${DATALOG_NGEN_CHECK_START_DATE}
+
     volumes:
       # - /etc/localtime:/etc/localtime:ro 
       # - /etc/timezone:/etc/timezone:ro

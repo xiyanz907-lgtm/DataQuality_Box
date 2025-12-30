@@ -1,5 +1,5 @@
 apache-airflow-providers-mysql
-polars
+polars==0.19.19
 pandas
 pandera==0.19.3
 influxdb-client

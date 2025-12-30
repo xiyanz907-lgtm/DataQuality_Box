@@ -1,0 +1,147 @@
+========================================================================
+Ground Truth Validation - Architecture Diagram
+========================================================================
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                     CONTROLLER DAG (dq_v1_controller)               │
+│                                                                     │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐         │
+│  │ Bucket       │───▶│  Dynamic     │───▶│  Trigger     │         │
+│  │ Brigade      │    │  Sharding    │    │  Workers     │         │
+│  │ (Readiness)  │    │  (5-10 cars) │    │ (No Wait)    │         │
+│  └──────────────┘    └──────────────┘    └──────────────┘         │
+│         │                    │                    │                │
+│         ▼                    ▼                    ▼                │
+│  Check 3 tables      Slice vehicles       TriggerDagRunOperator   │
+│  (daily, summary,    per batch             wait_for_completion=   │
+│   subtarget)                                False                  │
+└─────────────────────────────────────────────────────────────────────┘
+                               │
+                               │ dag_run.conf = {
+                               │   "target_shift_date": "2025-11-02",
+                               │   "vehicle_list": ["AT01", "AT02", ...]
+                               │ }
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│              WORKER DAG (dq_v1_worker_ground_truth)                 │
+│                                                                     │
+│  ┌────────────────────────────────────────────────────────────┐   │
+│  │  STEP 1: Extract Claims (MySQL)                            │   │
+│  │  ─────────────────────────────────────────────────────     │   │
+│  │  • Query: subtarget_vehicle_cycle                          │   │
+│  │  • Filter: shift_date + vehicle_ids (WHERE IN)             │   │
+│  │  • Polars: Unpivot 8 pairs (subtask_type, align_time)     │   │
+│  │  • Time: String → Datetime → Unix Timestamp (Int64)        │   │
+│  │  • Output: [vehicle_id, cycle_id, unix_timestamp]          │   │
+│  └────────────────────────────────────────────────────────────┘   │
+│                               │                                     │
+│                               ▼                                     │
+│  ┌────────────────────────────────────────────────────────────┐   │
+│  │  STEP 2: Fetch Physical Truth (InfluxDB)                   │   │
+│  │  ────────────────────────────────────────────────────      │   │
+│  │  • InfluxClient: Batch query                               │   │
+│  │  • Window: [timestamp - 1s, timestamp + 1s]                │   │
+│  │  • Aggregation: MEAN (x, y, speed) to remove GPS noise     │   │
+│  │  • Output: + [actual_x, actual_y, actual_speed]            │   │
+│  └────────────────────────────────────────────────────────────┘   │
+│                               │                                     │
+│                               ▼                                     │
+│  ┌────────────────────────────────────────────────────────────┐   │
+│  │  STEP 3: Fetch Semantic Truth (Map API)                    │   │
+│  │  ──────────────────────────────────────────────────────    │   │
+│  │  • MapClient: Batch mode (grouped by vehicle_id)           │   │
+│  │  • API: POST http://10.105.66.20:1234/api/.../batch        │   │
+│  │  • Payload: {vehicle_id, points: [{x, y, timestamp}]}      │   │
+│  │  • Parse: result[].attributes.road_type.road_type          │   │
+│  │  • Output: + [map_road_type]                               │   │
+│  └────────────────────────────────────────────────────────────┘   │
+│                               │                                     │
+│                               ▼                                     │
+│  ┌────────────────────────────────────────────────────────────┐   │
+│  │  STEP 4: Validate & Persist (Pandera + MySQL)              │   │
+│  │  ─────────────────────────────────────────────────────     │   │
+│  │  • Pandera Rules:                                          │   │
+│  │    - Location: map_road_type MUST contain "QC"             │   │
+│  │    - Stationarity: actual_speed <= 0.5                     │   │
+│  │  • Capture: failure_cases (SchemaErrors)                   │   │
+│  │  • Persist: qa_ground_truth_result table                   │   │
+│  │    (shift_date, vehicle_id, total, passed, failed)         │   │
+│  └────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    RESULT TABLE (MySQL)                             │
+│                                                                     │
+│  Table: dagster_pipelines.qa_ground_truth_result                   │
+│                                                                     │
+│  ┌─────────────┬─────────────┬───────┬────────┬─────────┐         │
+│  │ shift_date  │ vehicle_id  │ total │ passed │ failed  │         │
+│  ├─────────────┼─────────────┼───────┼────────┼─────────┤         │
+│  │ 2025-11-02  │ AT01        │  12   │  10    │   2     │         │
+│  │ 2025-11-02  │ AT02        │   8   │   8    │   0     │         │
+│  │ 2025-11-02  │ AT05        │  15   │  13    │   2     │         │
+│  └─────────────┴─────────────┴───────┴────────┴─────────┘         │
+│                                                                     │
+│  Purpose: Controller tracks completion via COUNT(DISTINCT vehicle) │
+└─────────────────────────────────────────────────────────────────────┘
+
+========================================================================
+Three-Layer Truth Reconciliation
+========================================================================
+
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│  Business Layer │      │ Physical Layer  │      │ Semantic Layer  │
+│   (MySQL Claim) │      │  (InfluxDB GPS) │      │  (Map Service)  │
+└────────┬────────┘      └────────┬────────┘      └────────┬────────┘
+         │                        │                        │
+         │  "Vehicle AT01         │  Actual position:      │  Road type:
+         │   was at QC zone       │  x=548.2, y=594.1      │  "QC"
+         │   at 09:32:02"         │  speed=0.3 m/s         │
+         │                        │                        │
+         └────────────────────────┴────────────────────────┘
+                                  │
+                                  ▼
+                          ┌───────────────┐
+                          │   Pandera     │
+                          │  Validation   │
+                          └───────────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │                           │
+                    ▼                           ▼
+            ┌──────────────┐          ┌──────────────┐
+            │  ✓ PASS      │          │  ✗ FAIL      │
+            │              │          │              │
+            │ - Location   │          │ - Speed > 0.5│
+            │   matches    │          │ - Wrong zone │
+            └──────────────┘          └──────────────┘
+
+========================================================================
+Key Technologies
+========================================================================
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ Component         │ Technology        │ Purpose                     │
+├───────────────────┼───────────────────┼─────────────────────────────┤
+│ Orchestration     │ Apache Airflow    │ Workflow management         │
+│ Data Transform    │ Polars            │ High-performance ETL        │
+│ Time Series DB    │ InfluxDB 2.x      │ GPS telemetry storage       │
+│ Validation        │ Pandera           │ Data quality rules          │
+│ Map Service       │ REST API          │ Geospatial annotation       │
+│ Persistence       │ MySQL             │ Results storage             │
+└─────────────────────────────────────────────────────────────────────┘
+
+========================================================================
+Performance Characteristics (per 8-vehicle batch)
+========================================================================
+
+Step 1 (MySQL + Polars):       2-5 seconds    ████░░░░░░ 25%
+Step 2 (InfluxDB):              5-10 seconds   ████████░░ 40%
+Step 3 (Map API):               3-8 seconds    ██████░░░░ 30%
+Step 4 (Pandera + MySQL):       1-2 seconds    █░░░░░░░░░  5%
+                               ─────────────────────────────
+Total:                         11-25 seconds   ██████████ 100%
+
+========================================================================
+

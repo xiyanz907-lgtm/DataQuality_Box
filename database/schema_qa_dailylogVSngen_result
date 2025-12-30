@@ -1,0 +1,14 @@
+-- Daily Vehicle VS NGen Result Table Schema
+-- 用于存储Daily Vehicle VS NGen 对账结果
+CREATE TABLE dagster_pipelines.datalog_ngen_check_result (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `shift_date` date NOT NULL,
+  `vehicle_id` varchar(50) NOT NULL,
+  `is_blocked` tinyint(1) DEFAULT '0',
+  `profiling_json` longtext,
+  `execution_time` datetime DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_shift_vehicle` (`shift_date`,`vehicle_id`),
+  KEY `idx_shift_date` (`shift_date`)
+) ENGINE=InnoDB AUTO_INCREMENT=36 DEFAULT CHARSET=utf8mb3;

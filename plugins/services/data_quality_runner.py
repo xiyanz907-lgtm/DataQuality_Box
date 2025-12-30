@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import warnings
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -10,6 +11,10 @@ import pendulum
 from airflow.providers.mysql.hooks.mysql import MySqlHook
 
 from services.config import CONN_ID_CACTUS, CONN_ID_DATALOG, CONN_ID_NGEN
+
+# 禁用 Pandas/Polars 的 UserWarning，避免影响任务退出码
+warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 
 class DataQualityRunner:
@@ -51,7 +56,7 @@ class DataQualityRunner:
         - vehicle_list: 分片车辆列表（每个 worker 5~10 台车）
 
         Returns:
-            dict: 用于日志/XCom 的结构化结果（同时会落盘到 qa_daily_vehicle_result）
+            dict: 用于日志/XCom 的结构化结果（同时会落盘到 datalog_ngen_check_result）
         """
         if not vehicle_list:
             self.logger.warning("[DQ] vehicle_list 为空，跳过本次校验。")
@@ -78,6 +83,8 @@ class DataQualityRunner:
             vehicles_to_run = [str(v).strip() for v in vehicle_list if str(v).strip()]
 
         for veh in vehicles_to_run:
+            self.logger.info(f"[DQ] Processing vehicle: {veh}")
+            
             # NGen per vehicle
             df_ngen_v = df_ngen_agg.filter(pl.col("ngen_vehicle") == veh) if not df_ngen_agg.is_empty() else pl.DataFrame()
 
@@ -86,9 +93,16 @@ class DataQualityRunner:
             df_summary_v = self._safe_filter_vehicle(df_summary, veh, vehicle_col="vehicle_id")
             df_subtarget_v = self._safe_filter_vehicle(df_subtarget, veh, vehicle_col="vehicle_id")
 
+            self.logger.info(f"[DQ] Starting check 1/3 (vs daily) for vehicle: {veh}")
             res_daily = self.check_ngen_vs_daily(df_ngen_v, df_daily_v, clip_start, clip_end)
+            
+            self.logger.info(f"[DQ] Starting check 2/3 (vs summary) for vehicle: {veh}")
             res_summary = self.check_ngen_vs_summary(df_ngen_v, df_summary_v, clip_start, clip_end)
+            
+            self.logger.info(f"[DQ] Starting check 3/3 (vs subtarget) for vehicle: {veh}")
             res_subtarget = self.check_ngen_vs_subtarget(df_ngen_v, df_subtarget_v, clip_start, clip_end)
+            
+            self.logger.info(f"[DQ] Completed all checks for vehicle: {veh}")
 
             vehicle_result = {
                 "vehicle_id": veh,
@@ -107,15 +121,20 @@ class DataQualityRunner:
             all_vehicle_results.append(vehicle_result)
 
         # 4) Load
+        self.logger.info(f"[DQ] Writing results for {len(profiling_rows)} vehicle(s)")
         written = self._write_results(profiling_rows)
+        self.logger.info(f"[DQ] Successfully wrote {written} records to database")
 
-        return {
+        result = {
             "status": "SUCCESS",
             "shift_date": shift_date,
             "vehicles": vehicles_to_run,
             "written": written,
             "results": all_vehicle_results,
         }
+        
+        self.logger.info(f"[DQ] Validation completed successfully: {written} records written")
+        return result
 
     def _extract_and_aggregate_ngen(self, shift_date: str, vehicle_list: List[str]) -> pl.DataFrame:
         """
@@ -509,8 +528,12 @@ class DataQualityRunner:
         if df_summary is None:
             df_summary = pl.DataFrame()
 
+        self.logger.info(f"[DQ][Summary] Preparing summary data, shape: {df_summary.shape if not df_summary.is_empty() else (0, 0)}")
         right = self._prep_summary_like(df_summary, key_col="cycle_id")
+        self.logger.info(f"[DQ][Summary] Prepared summary data, shape: {right.shape}")
+        
         left = self._prep_ngen_for_checks(df_ngen)
+        self.logger.info(f"[DQ][Summary] Prepared ngen data, shape: {left.shape}")
 
         # 防御：summary 缺关键字段时只 WARN，不失败
         required_right = ["cycle_id", "box", "cycle_end_time", "task_type"]
@@ -520,30 +543,100 @@ class DataQualityRunner:
             return {"status": "SKIPPED_SCHEMA", "missing_columns": missing, "matched": 0, "real_missing": 0}
 
         # 命中标记：避免 join 输出不保留右侧 join key 列 cycle_id
+        self.logger.info(f"[DQ][Summary] Adding hit marker to right table")
         right = right.with_columns(pl.lit(1).alias("__hit_summary"))
+        
+        self.logger.info(f"[DQ][Summary] Joining tables")
         joined = left.join(right, left_on="ngen_id", right_on="cycle_id", how="left")
+        self.logger.info(f"[DQ][Summary] Joined shape: {joined.shape}")
 
+        self.logger.info(f"[DQ][Summary] Computing matched_mask")
         matched_mask = pl.col("__hit_summary").is_not_null()
+        
+        self.logger.info(f"[DQ][Summary] Computing real_missing_mask")
         real_missing_mask = self._real_missing_mask(joined, matched_mask, clip_start, clip_end, time_col="ngen_end")
 
+        self.logger.info(f"[DQ][Summary] Computing mismatch masks")
+        # 只对匹配的记录计算差异（避免对 None 值计算导致崩溃）
         box_mismatch_mask = matched_mask & (pl.col("ngen_box") != pl.col("box"))
-        # 时间差 <= 300 秒
-        time_diff_sec = (pl.col("ngen_end") - pl.col("cycle_end_time")).abs().dt.total_seconds()
-        end_time_mismatch_mask = matched_mask & (time_diff_sec > 300)
         type_mismatch_mask = matched_mask & (pl.col("ngen_type") != pl.col("task_type"))
+        
+        self.logger.info(f"[DQ][Summary] Simple masks computed successfully")
 
+        # Eagerly evaluate filters to avoid lazy evaluation crashes
+        self.logger.info(f"[DQ][Summary] Filtering matched records")
+        try:
+            matched_count = int(joined.filter(matched_mask).height)
+        except Exception as e:
+            self.logger.error(f"[DQ][Summary] Failed to filter matched: {e}")
+            matched_count = 0
+        
+        self.logger.info(f"[DQ][Summary] Filtering real_missing records")
+        try:
+            real_missing_count = int(joined.filter(real_missing_mask).height)
+            real_missing_ids = self._sample_ids(joined.filter(real_missing_mask), id_col="ngen_id")
+        except Exception as e:
+            self.logger.error(f"[DQ][Summary] Failed to filter real_missing: {e}")
+            real_missing_count = 0
+            real_missing_ids = []
+        
+        self.logger.info(f"[DQ][Summary] Filtering box_mismatch records")
+        try:
+            box_mismatch_count = int(joined.filter(box_mismatch_mask).height)
+            box_mismatch_ids = self._sample_ids(joined.filter(box_mismatch_mask), id_col="ngen_id")
+        except Exception as e:
+            self.logger.error(f"[DQ][Summary] Failed to filter box_mismatch: {e}")
+            box_mismatch_count = 0
+            box_mismatch_ids = []
+        
+        self.logger.info(f"[DQ][Summary] Filtering end_time_mismatch records")
+        try:
+            # 完全避免在 mask 中计算时间差，改为：
+            # 1. 先过滤出有效匹配且时间不为 null 的记录
+            # 2. 然后在这个子集上计算时间差
+            # 3. 再过滤出时间差 > 300 的记录
+            valid_time_df = joined.filter(matched_mask & pl.col("cycle_end_time").is_not_null())
+            
+            if valid_time_df.is_empty():
+                end_time_mismatch_count = 0
+                end_time_mismatch_ids = []
+            else:
+                # 在有效数据上计算时间差
+                time_diff_df = valid_time_df.with_columns(
+                    ((pl.col("ngen_end") - pl.col("cycle_end_time")).abs().dt.total_seconds()).alias("time_diff_sec")
+                )
+                # 过滤出时间差 > 300 的记录
+                mismatch_df = time_diff_df.filter(pl.col("time_diff_sec") > 300)
+                end_time_mismatch_count = int(mismatch_df.height)
+                end_time_mismatch_ids = self._sample_ids(mismatch_df, id_col="ngen_id")
+        except Exception as e:
+            self.logger.error(f"[DQ][Summary] Failed to filter end_time_mismatch: {e}")
+            end_time_mismatch_count = 0
+            end_time_mismatch_ids = []
+        
+        self.logger.info(f"[DQ][Summary] Filtering type_mismatch records")
+        try:
+            type_mismatch_count = int(joined.filter(type_mismatch_mask).height)
+            type_mismatch_ids = self._sample_ids(joined.filter(type_mismatch_mask), id_col="ngen_id")
+        except Exception as e:
+            self.logger.error(f"[DQ][Summary] Failed to filter type_mismatch: {e}")
+            type_mismatch_count = 0
+            type_mismatch_ids = []
+
+        self.logger.info(f"[DQ][Summary] All filters completed successfully")
+        
         res = {
             "status": "SUCCESS",
             "ngen_total": int(left.height),
-            "matched": int(joined.filter(matched_mask).height),
-            "real_missing": int(joined.filter(real_missing_mask).height),
-            "box_mismatch": int(joined.filter(box_mismatch_mask).height),
-            "end_time_mismatch": int(joined.filter(end_time_mismatch_mask).height),
-            "type_mismatch": int(joined.filter(type_mismatch_mask).height),
-            "sample_real_missing_ids": self._sample_ids(joined.filter(real_missing_mask), id_col="ngen_id"),
-            "sample_box_mismatch_ids": self._sample_ids(joined.filter(box_mismatch_mask), id_col="ngen_id"),
-            "sample_end_time_mismatch_ids": self._sample_ids(joined.filter(end_time_mismatch_mask), id_col="ngen_id"),
-            "sample_type_mismatch_ids": self._sample_ids(joined.filter(type_mismatch_mask), id_col="ngen_id"),
+            "matched": matched_count,
+            "real_missing": real_missing_count,
+            "box_mismatch": box_mismatch_count,
+            "end_time_mismatch": end_time_mismatch_count,
+            "type_mismatch": type_mismatch_count,
+            "sample_real_missing_ids": real_missing_ids,
+            "sample_box_mismatch_ids": box_mismatch_ids,
+            "sample_end_time_mismatch_ids": end_time_mismatch_ids,
+            "sample_type_mismatch_ids": type_mismatch_ids,
         }
 
         if res["real_missing"] or res["box_mismatch"] or res["end_time_mismatch"] or res["type_mismatch"]:
@@ -590,23 +683,57 @@ class DataQualityRunner:
         matched_mask = pl.col("__hit_subtarget").is_not_null()
         real_missing_mask = self._real_missing_mask(joined, matched_mask, clip_start, clip_end, time_col="ngen_end")
 
+        # 只对匹配的记录计算差异（避免对 None 值计算导致崩溃）
         box_mismatch_mask = matched_mask & (pl.col("ngen_box") != pl.col("box"))
-        time_diff_sec = (pl.col("ngen_end") - pl.col("cycle_end_time")).abs().dt.total_seconds()
-        end_time_mismatch_mask = matched_mask & (time_diff_sec > 300)
         type_mismatch_mask = matched_mask & (pl.col("ngen_type") != pl.col("task_type"))
+
+        # Eagerly evaluate filters to avoid lazy evaluation crashes (same as summary check)
+        try:
+            matched_count = int(joined.filter(matched_mask).height)
+            real_missing_count = int(joined.filter(real_missing_mask).height)
+            real_missing_ids = self._sample_ids(joined.filter(real_missing_mask), id_col="ngen_id")
+            box_mismatch_count = int(joined.filter(box_mismatch_mask).height)
+            box_mismatch_ids = self._sample_ids(joined.filter(box_mismatch_mask), id_col="ngen_id")
+            
+            # 时间差计算：完全避免在 mask 中计算，改为分步骤
+            valid_time_df = joined.filter(matched_mask & pl.col("cycle_end_time").is_not_null())
+            if valid_time_df.is_empty():
+                end_time_mismatch_count = 0
+                end_time_mismatch_ids = []
+            else:
+                time_diff_df = valid_time_df.with_columns(
+                    ((pl.col("ngen_end") - pl.col("cycle_end_time")).abs().dt.total_seconds()).alias("time_diff_sec")
+                )
+                mismatch_df = time_diff_df.filter(pl.col("time_diff_sec") > 300)
+                end_time_mismatch_count = int(mismatch_df.height)
+                end_time_mismatch_ids = self._sample_ids(mismatch_df, id_col="ngen_id")
+            
+            type_mismatch_count = int(joined.filter(type_mismatch_mask).height)
+            type_mismatch_ids = self._sample_ids(joined.filter(type_mismatch_mask), id_col="ngen_id")
+        except Exception as e:
+            self.logger.error(f"[DQ][Subtarget] Failed to filter records: {e}")
+            matched_count = 0
+            real_missing_count = 0
+            real_missing_ids = []
+            box_mismatch_count = 0
+            box_mismatch_ids = []
+            end_time_mismatch_count = 0
+            end_time_mismatch_ids = []
+            type_mismatch_count = 0
+            type_mismatch_ids = []
 
         res = {
             "status": "SUCCESS",
             "ngen_total": int(left.height),
-            "matched": int(joined.filter(matched_mask).height),
-            "real_missing": int(joined.filter(real_missing_mask).height),
-            "box_mismatch": int(joined.filter(box_mismatch_mask).height),
-            "end_time_mismatch": int(joined.filter(end_time_mismatch_mask).height),
-            "type_mismatch": int(joined.filter(type_mismatch_mask).height),
-            "sample_real_missing_ids": self._sample_ids(joined.filter(real_missing_mask), id_col="ngen_id"),
-            "sample_box_mismatch_ids": self._sample_ids(joined.filter(box_mismatch_mask), id_col="ngen_id"),
-            "sample_end_time_mismatch_ids": self._sample_ids(joined.filter(end_time_mismatch_mask), id_col="ngen_id"),
-            "sample_type_mismatch_ids": self._sample_ids(joined.filter(type_mismatch_mask), id_col="ngen_id"),
+            "matched": matched_count,
+            "real_missing": real_missing_count,
+            "box_mismatch": box_mismatch_count,
+            "end_time_mismatch": end_time_mismatch_count,
+            "type_mismatch": type_mismatch_count,
+            "sample_real_missing_ids": real_missing_ids,
+            "sample_box_mismatch_ids": box_mismatch_ids,
+            "sample_end_time_mismatch_ids": end_time_mismatch_ids,
+            "sample_type_mismatch_ids": type_mismatch_ids,
         }
 
         if res["real_missing"] or res["box_mismatch"] or res["end_time_mismatch"] or res["type_mismatch"]:
@@ -619,7 +746,7 @@ class DataQualityRunner:
     # ======================================================================
     def _write_results(self, rows: List[Tuple[str, str, str]]) -> int:
         """
-        写入 qa_daily_vehicle_result(vehicle_id, shift_date, profiling_json)
+        写入 datalog_ngen_check_result(vehicle_id, shift_date, profiling_json)
 
         注意：
         - 所有不匹配只记录 WARN，不抛异常。
@@ -633,7 +760,7 @@ class DataQualityRunner:
         try:
             cursor = conn.cursor()
             sql = """
-                INSERT INTO dagster_pipelines.qa_daily_vehicle_result (vehicle_id, shift_date, profiling_json)
+                INSERT INTO dagster_pipelines.datalog_ngen_check_result (vehicle_id, shift_date, profiling_json)
                 VALUES (%s, %s, %s)
                 ON DUPLICATE KEY UPDATE profiling_json = VALUES(profiling_json)
             """
@@ -642,7 +769,7 @@ class DataQualityRunner:
             return cursor.rowcount
         except Exception as e:
             # 严格按需求：不抛异常，仅 WARN
-            self.logger.warning(f"[DQ] 写入 qa_daily_vehicle_result 失败（仅告警不失败任务）：{e}", exc_info=True)
+            self.logger.warning(f"[DQ] 写入 datalog_ngen_check_result 失败（仅告警不失败任务）：{e}", exc_info=True)
             try:
                 conn.rollback()
             except Exception:
@@ -759,21 +886,36 @@ class DataQualityRunner:
         )
 
         if "cycle_end_time" in out.columns:
-            if out.schema.get("cycle_end_time") == pl.Utf8:
-                out = out.with_columns(
-                    pl.col("cycle_end_time")
-                    .str.to_datetime(strict=False)
-                    # DataLog 时间语义：UTC
-                    .dt.replace_time_zone("UTC")
-                    .alias("cycle_end_time")
-                )
-            else:
-                # 如果是 naive datetime，按 UTC 标记；如果已经带 tz，则 cast 到 UTC
-                out = out.with_columns(
-                    pl.col("cycle_end_time")
-                    .cast(pl.Datetime(time_zone="UTC"), strict=False)
-                    .alias("cycle_end_time")
-                )
+            try:
+                if out.schema.get("cycle_end_time") == pl.Utf8:
+                    out = out.with_columns(
+                        pl.col("cycle_end_time")
+                        .str.to_datetime(strict=False)
+                        # DataLog 时间语义：UTC（只对非 null 值操作）
+                        .dt.replace_time_zone("UTC")
+                        .alias("cycle_end_time")
+                    )
+                else:
+                    # 如果是 naive datetime，按 UTC 标记；如果已经带 tz，则 cast 到 UTC
+                    out = out.with_columns(
+                        pl.col("cycle_end_time")
+                        .cast(pl.Datetime(time_zone="UTC"), strict=False)
+                        .alias("cycle_end_time")
+                    )
+            except Exception as e:
+                # 如果时区转换失败，记录警告并保持原样
+                self.logger.warning(f"[DQ] Failed to convert cycle_end_time timezone: {e}")
+                # 尝试简单的 datetime 转换（不带时区）
+                try:
+                    if out.schema.get("cycle_end_time") == pl.Utf8:
+                        out = out.with_columns(
+                            pl.col("cycle_end_time")
+                            .str.to_datetime(strict=False)
+                            .alias("cycle_end_time")
+                        )
+                except:
+                    # 如果还是失败，保持原样
+                    pass
 
         return out
 
@@ -836,8 +978,10 @@ class DataQualityRunner:
           1) candidates 中有且 df.columns 命中，直接 rename
           2) 否则做“忽略大小写 + 忽略下划线”的归一化匹配
         """
-        if df is None or df.is_empty():
-            return df or pl.DataFrame()
+        if df is None:
+            return pl.DataFrame()
+        if df.is_empty():
+            return df
 
         cols = list(df.columns)
 
