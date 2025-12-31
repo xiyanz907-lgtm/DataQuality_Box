@@ -61,8 +61,6 @@ services:
       - AIRFLOW__SMTP__SMTP_USER=${SMTP_USER}
       - AIRFLOW__SMTP__SMTP_PASSWORD=${SMTP_PASSWORD}
       - AIRFLOW__SMTP__SMTP_MAIL_FROM=${SMTP_MAIL_FROM}
-      # 可选：使用 Airflow Connection（未来版本会逐步弃用从 config 里取 SMTP 凭据）
-      - AIRFLOW_CONN_SMTP_DEFAULT=${SMTP_CONN_URI:-}
 
            #  【注入数据库连接配置】
       - AIRFLOW_CONN_NGEN_MYSQL_CONN=mysql://${NGEN_USER}:${NGEN_PASSWORD}@${NGEN_HOST}:${NGEN_PORT}/${NGEN_DB_NAME}
