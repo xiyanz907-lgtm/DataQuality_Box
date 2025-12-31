@@ -33,6 +33,8 @@ services:
     environment:
       - TZ=${SITE_TIMEZONE}  #挂载宿主机时间
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      # Airflow 2.x 兼容：优先使用 [database].sql_alchemy_conn；保留旧 key 避免环境里存在旧版本
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
       - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
 
@@ -52,11 +54,15 @@ services:
             # 【注入SMTP配置】
       - AIRFLOW__SMTP__SMTP_HOST=${SMTP_HOST}
       - AIRFLOW__SMTP__SMTP_PORT=${SMTP_PORT}
-      - AIRFLOW__SMTP__SMTP_SSL=True
-      - AIRFLOW__SMTP__SMTP_STARTTLS=False     
+      # 不要写死 SSL/STARTTLS：内网 25 端口一般为 STARTTLS；公网 465 一般为 SSL
+      - AIRFLOW__SMTP__SMTP_SSL=${SMTP_SSL:-False}
+      - AIRFLOW__SMTP__SMTP_STARTTLS=${SMTP_STARTTLS:-True}
+      - AIRFLOW__SMTP__SMTP_TIMEOUT=${SMTP_TIMEOUT:-30}
       - AIRFLOW__SMTP__SMTP_USER=${SMTP_USER}
       - AIRFLOW__SMTP__SMTP_PASSWORD=${SMTP_PASSWORD}
       - AIRFLOW__SMTP__SMTP_MAIL_FROM=${SMTP_MAIL_FROM}
+      # 可选：使用 Airflow Connection（未来版本会逐步弃用从 config 里取 SMTP 凭据）
+      - AIRFLOW_CONN_SMTP_DEFAULT=${SMTP_CONN_URI:-}
 
            #  【注入数据库连接配置】
       - AIRFLOW_CONN_NGEN_MYSQL_CONN=mysql://${NGEN_USER}:${NGEN_PASSWORD}@${NGEN_HOST}:${NGEN_PORT}/${NGEN_DB_NAME}
