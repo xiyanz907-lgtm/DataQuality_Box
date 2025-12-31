@@ -125,7 +125,7 @@ class ReconciliationEngine:
                   )
                   .unique()
                   .sort()
-                  .get(0)
+                  .first()
                   .alias("ref_cnt_large"),
 
                 # ref_cnt_small_list: 20尺列表, 去重排序
