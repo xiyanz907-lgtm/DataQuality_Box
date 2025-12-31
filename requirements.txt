@@ -1,7 +1,0 @@
-apache-airflow-providers-mysql
-polars==0.19.19
-pandas
-pandera==0.19.3
-influxdb-client
-psycopg2-binary
-apache-airflow-providers-postgres
