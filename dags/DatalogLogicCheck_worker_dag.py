@@ -229,6 +229,35 @@ with DAG(
         if df_pandas.empty:
             logger.warning(f"[Step 1] No data found for shift_date={shift_date}, vehicles={vehicle_ids}")
             return None
+
+        # 产线常见差异：ALIGN_STA_TIME_*_SUBTASK 可能是 DATETIME 类型（pandas datetime64 或 python datetime）
+        # 而后续 Polars 会对该列使用 .str.strptime（要求 Utf8）。
+        # 这里统一标准化为 "YYYY-mm-dd HH:MM:SS" 字符串，空值保持为 None。
+        import pandas as pd
+
+        align_cols = [f"ALIGN_STA_TIME_{i}_SUBTASK" for i in range(1, 9)]
+        for col in align_cols:
+            if col not in df_pandas.columns:
+                continue
+
+            if pd.api.types.is_datetime64_any_dtype(df_pandas[col]):
+                df_pandas[col] = df_pandas[col].dt.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                # 有些驱动会返回 object 列，其中元素是 python datetime
+                def _to_time_str(v):
+                    if v is None or (isinstance(v, float) and pd.isna(v)):
+                        return None
+                    if hasattr(v, "strftime"):
+                        try:
+                            return v.strftime("%Y-%m-%d %H:%M:%S")
+                        except Exception:
+                            return str(v)
+                    return v
+
+                df_pandas[col] = df_pandas[col].apply(_to_time_str)
+
+            # 保持空值为 None（避免 "NaT"/nan 进入字符串解析）
+            df_pandas[col] = df_pandas[col].where(df_pandas[col].notna(), None)
         
         logger.info(f"[Step 1] Fetched {len(df_pandas)} rows from MySQL")
         
