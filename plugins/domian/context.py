@@ -225,7 +225,7 @@ class GovernanceContext:
         """
         resolved_key = self._resolve_key(key, use_alt_key)
         if resolved_key not in self.data_registry:
-        raise KeyError(f"Data key '{key}' not found.")
+            raise KeyError(f"Data key '{key}' not found.")
         return self.data_registry[resolved_key].uri
     
     # ========================================================================
