@@ -1,0 +1,45 @@
+# p2_timeout.yaml
+# 规则配置文件：P2 - 作业超时监控
+#
+# 功能：检测 duration > 7200 秒（2小时）的作业超时
+# 治理等级：P2 (Violation)
+# 处理方式：结合 P1 结果进行判决、发工单
+#
+# 特殊逻辑：
+# - 如果作业是双箱作业（P1 命中），则豁免超时告警
+# - 豁免逻辑在 ContextAggregatorOperator 中实现
+
+# 规则元信息
+meta:
+  rule_id: rule_p2_timeout
+  severity: P2
+  description: "作业超时监控：检测 duration > 2h 的作业，结合 P1 豁免"
+  owner: data-governance@example.com
+  created_at: "2026-01-23"
+
+# 目标实体
+target_entity: Cycle
+
+# 输入数据（从 Context 读取）
+input:
+  key: entity_cycle  # 引用 Adapter 写入的实体数据
+
+# 规则逻辑（Polars 表达式）
+logic:
+  # 过滤条件：duration > 7200 秒（2小时）
+  filter_expr: "pl.col('duration') > 7200"
+
+# 输出配置
+output:
+  key: rule_p2_timeout_hits  # 写入 Context 的 key
+  stage: RESULT               # 数据阶段
+
+# 告警配置
+alert:
+  enabled: true
+  template: "作业超时: {trigger_cycle_ids}"
+  title: "P2 告警：作业超时监控"
+
+# 依赖关系（此规则依赖 P1，用于豁免逻辑）
+depends_on:
+  - rule_p1_twin_lift  # 依赖 P1 规则，确保 P1 先执行

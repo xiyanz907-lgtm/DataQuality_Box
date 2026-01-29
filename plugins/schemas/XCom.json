@@ -1,0 +1,35 @@
+{
+    "batch_id": "BATCH_20260122_153000",
+    "run_date": "2026-01-22",
+    "data_registry": {
+      "entity_cycle": {
+        "key": "entity_cycle",
+        "uri": "file:///data/batch/entity/cycle.parquet",
+        "stage": "ENTITY",
+        "row_count": 5000,
+        "alt_key": "Cycle"
+      }
+    },
+    "alerts": [
+      {
+        "rule_id": "p0_time_inversion",
+        "severity": "P0",
+        "title": "[P0] 物理逻辑错误",
+        "content": "发现 5 条时间倒挂数据，ID: [C1, C2...]",
+        "labels": {}
+      }
+    ],
+    "assets": [
+      {
+        "asset_id": "C_1001",
+        "asset_type": "TWIN_LIFT",
+        "vehicle_id": "V_570",
+        "time_window": {
+          "start": "2026-01-22T10:00:00Z",
+          "end": "2026-01-22T12:00:00Z"
+        },
+        "target_storage_path": "TANGSHAN/corner_case/BATCH_.../C_1001/",
+        "tags": ["VALID_TWIN_LIFT"]
+      }
+    ]
+  }

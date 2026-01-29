@@ -1,0 +1,64 @@
+# cycle_adapter.yaml
+# 领域适配器配置文件
+#
+# 功能：将原始数据映射为领域实体（Cycle）
+# 使用者：DomainAdapterOperator
+
+# 目标实体
+target_entity: Cycle
+
+# 输入数据源（从 Context 读取）
+inputs:
+  - key: raw_mysql_summary  # 引用 Loader 写入的数据
+    alias: summary          # 别名，用于 Join 和 Mapping
+
+# 输出配置
+output:
+  key: entity_cycle  # 写入 Context 的 key
+  stage: ENTITY      # 数据阶段
+
+# Join 配置（如果需要多表关联）
+joins: []
+  # 示例：关联多个数据源
+  # - left: summary
+  #   right: detail
+  #   how: left
+  #   left_on: cycle_id
+  #   right_on: cycle_id
+
+# 字段映射（将原始字段映射为实体字段）
+field_mapping:
+  # 直接映射（字段名相同）
+  cycle_id: cycle_id
+  vehicle_id: vehicle_id
+  start_time: start_time
+  end_time: end_time
+  duration: duration
+  is_twin_lift: is_twin_lift
+  box_count: box_count
+  task_type: task_type
+  
+  # 表达式映射（需要计算的字段）
+  # 示例：将秒转换为分钟
+  # duration_minutes: "pl.col('duration') / 60"
+  
+  # 扩展属性（JSON 格式，用于存储额外信息）
+  extra_attributes: "{}"  # 空字典，暂无扩展属性
+
+# 数据清洗规则（在映射之前应用）
+data_cleaning:
+  # 删除重复数据（根据 cycle_id）
+  drop_duplicates:
+    - cycle_id
+  
+  # 删除空值（如果某些字段为空，则删除整行）
+  drop_nulls:
+    - cycle_id
+    - start_time
+    - end_time
+  
+  # 填充空值（用默认值填充）
+  fill_nulls:
+    is_twin_lift: 0
+    box_count: 0
+    task_type: "UNKNOWN"
