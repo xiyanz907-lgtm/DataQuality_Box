@@ -1,3 +1,4 @@
+import os
 """
 operators/dispatcher.py
 通知分发器
@@ -334,7 +335,7 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
             body: 邮件正文（HTML）
         """
         # 从配置读取收件人
-        email_to = self._config.get('email_to', 'admin@example.com')
+        email_to = self._config.get('email_to', os.getenv('ALERT_EMAIL_TO', 'xiyan.zhou@westwell-lab.com'))
         email_cc = self._config.get('email_cc')
         
         # 转换为列表

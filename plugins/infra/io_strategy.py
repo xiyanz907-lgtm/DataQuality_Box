@@ -144,17 +144,40 @@ class IOStrategy:
     @staticmethod
     def _read_local(uri: str) -> pl.DataFrame:
         """读取本地文件系统"""
+        import glob as glob_module
+        
         local_dir = uri.replace("file://", "")
         
         # 检查目录是否存在
         if not os.path.exists(local_dir):
             raise FileNotFoundError(f"Directory not found: {local_dir}")
         
-        # Polars 自动扫描目录下所有 parquet 文件
-        # 使用 glob 模式匹配
+        # ⚠️ 关键修复：不使用 Polars 的 glob 模式（会触发 Hive 分区推断）
+        # 而是手动列出所有文件，逐个读取后合并
         pattern = os.path.join(local_dir, "*.parquet")
+        parquet_files = sorted(glob_module.glob(pattern))
         
-        return pl.read_parquet(pattern)
+        if not parquet_files:
+            raise FileNotFoundError(f"No parquet files found in: {local_dir}")
+        
+        # 读取所有文件并合并
+        if len(parquet_files) == 1:
+            # 单文件：直接读取
+            df = pl.read_parquet(parquet_files[0])
+        else:
+            # 多文件：逐个读取后拼接
+            dfs = [pl.read_parquet(f) for f in parquet_files]
+            df = pl.concat(dfs, how="vertical")
+        
+        # ✅ 此时数据中不包含 Hive 分区字段（因为我们读取的是单个文件，不是目录）
+        # 但为了保险起见，仍然检查并删除（防止文件内部包含这些字段）
+        partition_columns = ['batch_id', 'stage', 'key']
+        columns_to_drop = [col for col in partition_columns if col in df.columns]
+        
+        if columns_to_drop:
+            df = df.drop(columns_to_drop)
+        
+        return df
     
     @staticmethod
     def _clean_local(uri: str) -> None:
@@ -196,7 +219,17 @@ class IOStrategy:
         # Polars 支持 S3 glob 模式
         pattern = uri + "*.parquet"
         
-        return pl.read_parquet(pattern, storage_options=storage_options)
+        # 读取数据
+        df = pl.read_parquet(pattern, storage_options=storage_options)
+        
+        # ⚠️ 移除 Hive 分区字段（与 _read_local 保持一致）
+        partition_columns = ['batch_id', 'stage', 'key']
+        columns_to_drop = [col for col in partition_columns if col in df.columns]
+        
+        if columns_to_drop:
+            df = df.drop(columns_to_drop)
+        
+        return df
     
     @staticmethod
     def _clean_minio(uri: str) -> None:

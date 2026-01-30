@@ -93,7 +93,7 @@ class BaseGovernanceOperator(BaseOperator, ABC):
             self.execute_logic(ctx, context)
             
             # Step 3: 收尾阶段
-            self.post_execute(ctx, context)
+            self._post_execute_internal(ctx, context)
             
             # Step 4: 返回序列化的 Context（Airflow 标准）
             return ctx.to_json()
@@ -163,9 +163,9 @@ class BaseGovernanceOperator(BaseOperator, ABC):
         
         return ctx
     
-    def post_execute(self, ctx: GovernanceContext, context: Dict[str, Any]) -> None:
+    def _post_execute_internal(self, ctx: GovernanceContext, context: Dict[str, Any]) -> None:
         """
-        收尾阶段
+        收尾阶段（内部方法，避免与 Airflow 的 post_execute 冲突）
         
         职责：
         1. 记录完成日志
@@ -191,6 +191,22 @@ class BaseGovernanceOperator(BaseOperator, ABC):
         if ctx.rule_outputs:
             self.log.info(f"Executed {len(ctx.rule_outputs)} rules")
     
+    def post_execute(self, context: Dict[str, Any], result=None) -> None:
+        """
+        Airflow 框架回调（兼容 Airflow 2.x）
+        
+        注意：
+        - 此方法由 Airflow 框架自动调用，不要手动调用
+        - 我们的内部收尾逻辑在 _post_execute_internal() 中
+        - 这里只是为了兼容 Airflow 的调用，避免 TypeError
+        
+        Args:
+            context: Airflow 上下文
+            result: 任务执行结果（可选）
+        """
+        # 空实现，因为我们的收尾逻辑已在 _post_execute_internal() 中完成
+        pass
+    
     # ========================================================================
     # Context 管理
     # ========================================================================
@@ -200,8 +216,9 @@ class BaseGovernanceOperator(BaseOperator, ABC):
         恢复 Context（单上游场景）
         
         策略：
-        1. 优先从上游 Task 的 return_value 恢复
-        2. 如果没有上游，创建新 Context（兜底逻辑）
+        1. 优先使用显式指定的 upstream_task_id
+        2. 自动从 Airflow 上游任务列表获取（单上游场景）
+        3. 如果没有上游，创建新 Context（兜底逻辑）
         
         子类可重写此方法以支持多上游场景（如 Aggregator）
         
@@ -213,18 +230,33 @@ class BaseGovernanceOperator(BaseOperator, ABC):
         """
         ti = context['task_instance']
         
+        # 确定上游任务 ID
+        upstream_id = self.upstream_task_id
+        
+        # 如果没有显式指定，尝试自动获取
+        if not upstream_id:
+            upstream_task_ids = ti.task.upstream_task_ids
+            if len(upstream_task_ids) == 1:
+                upstream_id = list(upstream_task_ids)[0]
+                self.log.info(f"🔍 Auto-detected upstream task: {upstream_id}")
+            elif len(upstream_task_ids) > 1:
+                self.log.warning(
+                    f"⚠️ Multiple upstream tasks found: {upstream_task_ids}. "
+                    f"Please specify 'upstream_task_id' explicitly or override '_restore_context()'."
+                )
+        
         # 从上游恢复
-        if self.upstream_task_id:
+        if upstream_id:
             try:
                 # 拉取上游的 return_value（Airflow 标准）
-                ctx_json = ti.xcom_pull(task_ids=self.upstream_task_id)
+                ctx_json = ti.xcom_pull(task_ids=upstream_id)
                 
                 if ctx_json:
                     ctx = GovernanceContext.from_json(ctx_json)
-                    self.log.info(f"✅ Restored context from upstream: {self.upstream_task_id}")
+                    self.log.info(f"✅ Restored context from upstream: {upstream_id}")
                     return ctx
                 else:
-                    self.log.warning(f"⚠️ Upstream task [{self.upstream_task_id}] returned None")
+                    self.log.warning(f"⚠️ Upstream task [{upstream_id}] returned None")
             except Exception as e:
                 self.log.warning(f"⚠️ Failed to restore context from upstream: {e}")
         

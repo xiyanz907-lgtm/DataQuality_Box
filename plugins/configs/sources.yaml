@@ -3,55 +3,83 @@
 #
 # 功能：定义数据提取规则
 # 使用者：UniversalLoaderOperator
+#
+# 配置格式说明：
+# - source_meta: 数据源元信息（连接配置）
+# - extractions: 抽取任务列表（注意是复数）
 
-sources:
-  # 数据源 1：MySQL - 作业汇总表
-  - id: mysql_summary
-    type: mysql
-    conn_id: mysql_default  # Airflow Connection ID
-    query: |
+# ============================================================
+# 数据源元信息（必需）
+# ============================================================
+source_meta:
+  id: "datalog_mysql_governance"        # 数据源标识
+  type: "mysql"                          # 数据源类型
+  connection_id: "datalog_mysql_conn"   # Airflow Connection ID（与 .env 配置对应）
+
+# ============================================================
+# 抽取任务列表（必需，注意是 extractions 复数）
+# ============================================================
+extractions:
+  # ========================================
+  # 任务 1：抽取 cycle_section_summary 表
+  # ========================================
+  - id: "cycle_section_summary"         # 任务标识（用于日志）
+    output_key: "raw_cycle_section"     # 写入 Context 的键名
+    sql: |
       SELECT
         cycle_id,
         vehicle_id,
-        start_time,
-        end_time,
-        TIMESTAMPDIFF(SECOND, start_time, end_time) AS duration,
-        is_twin_lift,
-        box_count,
+        cycle_start_time AS start_time,     -- 字段重命名为标准名称
+        cycle_end_time AS end_time,
+        TIMESTAMPDIFF(SECOND, cycle_start_time, cycle_end_time) AS duration,
         task_type
-      FROM operation_summary
-      WHERE DATE(start_time) = '{{ ds }}'  # Jinja2 模板支持
-    
-    # 输出配置
-    output:
-      key: raw_mysql_summary  # 写入 Context 的 key
-      stage: RAW              # 数据阶段（RAW / ENTITY / RESULT）
-  
-  # 数据源 2：InfluxDB - 时序数据（示例，曳光弹场景暂不使用）
-  # - id: influx_vehicle_state
-  #   type: influxdb
-  #   conn_id: influxdb_default
-  #   query: |
-  #     SELECT
-  #       vehicle_id,
-  #       time,
-  #       position_x,
-  #       position_y,
-  #       speed
-  #     FROM vehicle_state
-  #     WHERE time >= '{{ data_interval_start }}' AND time < '{{ data_interval_end }}'
-  #   
-  #   output:
-  #     key: raw_influx_vehicle
-  #     stage: RAW
+      FROM cycle_section_summary
+      WHERE DATE(shift_date) = '{{ ds }}'
+    alt_key: null                        # 可选：备用键名
 
-  # 数据源 3：S3 - 外部数据文件（示例）
-  # - id: s3_external_data
-  #   type: s3
-  #   bucket: governance-data
-  #   prefix: external/{{ ds }}/
-  #   file_pattern: "*.parquet"
-  #   
-  #   output:
-  #     key: raw_s3_external
-  #     stage: RAW
+  # ========================================
+  # 任务 2：抽取 subtarget_vehicle_cycle 表
+  # ========================================
+  - id: "subtarget_vehicle_cycle"
+    output_key: "raw_vehicle_cycle"
+    sql: |
+      SELECT
+        TRACTOR_CYCLE_ID AS cycle_id,          -- 字段重命名
+        TWIN_LIFT_INDICATOR AS is_twin_lift,
+        BOX AS box_count
+      FROM subtarget_vehicle_cycle
+      WHERE DATE(shift_date) = '{{ ds }}'     -- 根据实际日期字段调整
+    alt_key: null
+
+# ============================================================
+# 配置说明
+# ============================================================
+# 
+# 1. source_meta（必需）
+#    - connection_id: 必须与 Airflow Connection 的 ID 一致
+#      在 docker-compose.yml 中已配置：
+#      AIRFLOW_CONN_DATALOG_MYSQL_CONN=mysql://${DATALOG_USER}:${DATALOG_PASSWORD}@${DATALOG_HOST}:${DATALOG_PORT}/${DATALOG_DB_NAME}
+#
+# 2. extractions（必需，注意复数）
+#    - id: 任务标识（用于日志记录）
+#    - output_key: 写入 Context 的键名（后续 Adapter 会引用此键名）
+#    - sql: SQL 查询语句
+#    - alt_key: 可选，备用键名
+#
+# 3. SQL 查询支持 Jinja2 模板变量：
+#    - {{ ds }}: 运行日期（YYYY-MM-DD 格式）
+#    - {{ ts }}: 运行时间戳（ISO 8601 格式）
+#    - {{ ts_nodash }}: 运行时间戳（无分隔符，如 20260129T091837）
+#
+# 4. 字段重命名建议：
+#    - 在 SQL 中使用 AS 直接重命名为标准字段名
+#    - 例如：cycle_start_time AS start_time
+#    - 这样可以减少后续 Adapter 的映射复杂度
+#
+# 5. 日期过滤条件：
+#    - cycle_section_summary: 使用 cycle_start_time 字段
+#    - subtarget_vehicle_cycle: 使用 created_at 字段（请根据实际表结构调整）
+#
+# 6. 字段名注意事项：
+#    - 请确认实际表结构中的字段名（大小写敏感）
+#    - TRACTOR_CYCLE_ID、TWIN_LIFT_INDICATOR 等字段名需要与实际表一致

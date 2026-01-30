@@ -435,7 +435,8 @@ class GovernanceContext:
                 bucket = 'governance-bucket'
             return f"s3://{bucket}"
         else:
-            return "file:///data/governance"
+            # 使用已挂载的 /opt/airflow/data 目录（对应宿主机 ../data）
+            return "file:///opt/airflow/data/governance"
     
     def _build_partition_path(self, stage: str, key: str) -> str:
         """

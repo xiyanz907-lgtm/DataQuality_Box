@@ -136,11 +136,12 @@ with DAG(
     # ========================================================================
     if rule_task_group:
         # 如果有规则任务，聚合所有规则的结果
-        rule_task_ids = [rule['rule_id'] for rule in rules]
+        # ⚠️ 注意：规则任务在 TaskGroup 中，需要添加前缀
+        rule_task_ids = [f"rule_tasks.{rule['rule_id']}" for rule in rules]
         
         aggregator_task = ContextAggregatorOperator(
             task_id='context_aggregator',
-            upstream_task_ids=rule_task_ids,  # 传入所有规则任务的 task_id
+            upstream_task_ids=rule_task_ids,  # 传入所有规则任务的 task_id（带 TaskGroup 前缀）
         )
         
         # 设置依赖：Rule Tasks -> Aggregator

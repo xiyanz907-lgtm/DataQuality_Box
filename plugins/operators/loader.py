@@ -163,7 +163,10 @@ class UniversalLoaderOperator(BaseGovernanceOperator):
         source_meta: Dict[str, Any]
     ) -> pl.DataFrame:
         """
-        从 MySQL 抽取数据
+        从 MySQL 抽取数据（使用 Airflow Hook + Pandas 中转）
+        
+        策略：Hook → Pandas → Polars
+        优点：无外部依赖（connectorx），稳定可靠
         
         Args:
             sql: 渲染后的 SQL
@@ -174,14 +177,32 @@ class UniversalLoaderOperator(BaseGovernanceOperator):
         """
         connection_id = source_meta['connection_id']
         
-        # 使用 Airflow Hook 获取连接
-        hook = MySqlHook(mysql_conn_id=connection_id)
-        connection_uri = hook.get_uri()
-        
-        # 使用 Polars 读取（高性能）
-        df = pl.read_database(query=sql, connection=connection_uri)
-        
-        return df
+        try:
+            # 1. 使用 MySqlHook 获取 Pandas DataFrame
+            hook = MySqlHook(mysql_conn_id=connection_id)
+            self.log.info(f"🔌 Connecting to MySQL via Hook: {connection_id}")
+            
+            pandas_df = hook.get_pandas_df(sql=sql)
+            self.log.info(f"✅ Fetched {len(pandas_df)} rows from MySQL")
+            
+            # 2. 处理空结果集
+            if pandas_df.empty:
+                self.log.warning("⚠️ Query returned empty result")
+                return pl.from_pandas(pandas_df)
+            
+            # 3. 转换为 Polars DataFrame
+            polars_df = pl.from_pandas(pandas_df)
+            self.log.info(
+                f"✅ Converted to Polars: {polars_df.height} rows × "
+                f"{polars_df.width} columns"
+            )
+            
+            return polars_df
+            
+        except Exception as e:
+            self.log.error(f"❌ MySQL extraction failed: {str(e)}")
+            self.log.error(f"SQL preview: {sql[:500]}...")
+            raise
     
     def _render_sql(self, sql_template: str, context: Dict[str, Any]) -> str:
         """
