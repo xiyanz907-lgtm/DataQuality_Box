@@ -33,6 +33,7 @@ services:
     environment:
       - TZ=${SITE_TIMEZONE}  #挂载宿主机时间
       - PYTHONPATH=/opt/airflow  # 添加 plugins 模块路径
+      - LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6  # 修复 MySQL-Python TLS 问题
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       # Airflow 2.x 兼容：优先使用 [database].sql_alchemy_conn；保留旧 key 避免环境里存在旧版本
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
@@ -111,6 +112,8 @@ services:
       - ../incoming_files:/opt/airflow/incoming_files
       - ../data:/opt/airflow/data
       - ../config:/opt/airflow/config
+      # Mount data directory for Parquet storage
+      - /home/ubuntu/cactus_box/data:/data
     ports:
       - "8081:8080" 
     depends_on:
