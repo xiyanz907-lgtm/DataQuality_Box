@@ -1,0 +1,58 @@
+# ============================================================
+# 示例2: DATASET 事件驱动的数据治理 DAG
+# 当资产打包完成后，触发二次分析和评估
+# ============================================================
+
+source_meta:
+  id: "asset_driven_etl"
+  name: "资产事件驱动的数据分析"
+  description: "监听资产打包完成事件，对已打包资产进行深度分析"
+  target_entity: "Cycle"
+  owner: "box_admin"
+  tags: ["event-driven", "asset", "analysis"]
+
+# 调度策略
+scheduling:
+  trigger_mode: "DATASET"
+  dataset_uri: "mysql://qa_mysql_conn/auto_test_case_catalog"  # 监听资产表变化
+  
+  # 可选：额外的前置条件，确保上游任务完成
+  sensor:
+    enabled: true
+    type: "EXTERNAL_TASK"
+    external_dag_id: "gov_asset_packing"
+    external_task_id: "validate_packing_results"
+    timeout: 7200       # 2小时超时
+    poke_interval: 120  # 每2分钟检查一次
+    mode: "reschedule"
+
+# 数据提取配置
+extractions:
+  - id: "raw_packaged_assets"
+    source_type: "mysql"
+    conn_id: "qa_mysql_conn"
+    query: |
+      SELECT 
+        id,
+        batch_id,
+        cycle_id,
+        vehicle_id,
+        shift_date,
+        category,
+        case_tags,
+        severity,
+        trigger_timestamp,
+        time_window_start,
+        time_window_end,
+        raw_data_uri,
+        pack_url
+      FROM auto_test_case_catalog
+      WHERE process_status = 'PACKAGED'
+        AND DATE(pack_completed_at) = '{{ ds }}'
+      ORDER BY trigger_timestamp DESC
+      LIMIT 1000
+    output_key: "raw_packaged_assets"
+
+default_args:
+  retries: 2
+  email: ["qa-team@example.com"]

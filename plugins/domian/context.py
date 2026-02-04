@@ -79,6 +79,7 @@ class AssetItem:
     """资产信号：用于触发打包"""
     asset_id: str                   # 业务主键 (Cycle ID)
     asset_type: str                 # 类型 (e.g. 'TWIN_LIFT')
+    rule_id: str                    # 触发规则ID (e.g. 'rule_p1_twin_lift')
     
     # 核心打包参数
     vehicle_id: str                 # 车辆号
@@ -302,7 +303,7 @@ class GovernanceContext:
         self.alerts.append(alert)
         self.log(f"Added alert: {rule_id} ({severity})")
     
-    def add_asset(self, asset_id: str, asset_type: str, vehicle_id: str,
+    def add_asset(self, asset_id: str, asset_type: str, rule_id: str, vehicle_id: str,
                  start_ts: str, end_ts: str, tags: List[str], 
                  target_path: str) -> None:
         """
@@ -311,6 +312,7 @@ class GovernanceContext:
         Args:
             asset_id: 资产ID（通常是 cycle_id）
             asset_type: 资产类型
+            rule_id: 触发规则ID
             vehicle_id: 车辆号
             start_ts: 开始时间
             end_ts: 结束时间
@@ -320,13 +322,14 @@ class GovernanceContext:
         asset = AssetItem(
             asset_id=asset_id,
             asset_type=asset_type,
+            rule_id=rule_id,
             vehicle_id=vehicle_id,
             time_window={"start": start_ts, "end": end_ts},
             target_storage_path=target_path,
             tags=tags
         )
         self.assets.append(asset)
-        self.log(f"Added asset: {asset_id} ({asset_type})")
+        self.log(f"Added asset: {asset_id} ({asset_type}, {rule_id})")
 
     # ========================================================================
     # 审计方法

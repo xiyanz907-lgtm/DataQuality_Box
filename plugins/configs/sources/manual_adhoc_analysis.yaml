@@ -1,0 +1,46 @@
+# ============================================================
+# 示例3: MANUAL 手动触发的 Ad-hoc 分析 DAG
+# 用于临时性数据分析，无自动调度
+# ============================================================
+
+source_meta:
+  id: "manual_adhoc_analysis"
+  name: "手动触发的临时分析"
+  description: "用于测试和临时数据分析，手动触发执行"
+  target_entity: "Cycle"
+  owner: "data_analyst"
+  tags: ["manual", "adhoc", "testing"]
+
+# 调度策略
+scheduling:
+  trigger_mode: "MANUAL"  # 仅支持手动触发
+  
+  # 可选：执行前等待一段时间（用于测试延迟场景）
+  sensor:
+    enabled: false
+    type: "TIME"
+    wait_seconds: 60  # 等待1分钟
+
+# 数据提取配置
+extractions:
+  - id: "raw_cycle_sample"
+    source_type: "mysql"
+    conn_id: "datalog_mysql_conn"
+    query: |
+      SELECT * FROM cycle_section_summary
+      ORDER BY end_time DESC
+      LIMIT 100  -- 仅抽取最新100条用于测试
+    output_key: "raw_cycle_section"
+
+  - id: "raw_vehicle_sample"
+    source_type: "mysql"
+    conn_id: "datalog_mysql_conn"
+    query: |
+      SELECT * FROM subtarget_vehicle_cycle
+      ORDER BY shift_date DESC
+      LIMIT 100
+    output_key: "raw_vehicle_cycle"
+
+default_args:
+  retries: 1  # 手动任务失败不自动重试
+  email_on_failure: false

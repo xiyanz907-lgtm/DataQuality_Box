@@ -84,12 +84,13 @@ class ContextAggregatorOperator(BaseGovernanceOperator):
         # 合并 Context（取第一个作为基础）
         merged_ctx = contexts[0]
         
-        # 合并其他 Context 的 rule_outputs 和 audit_logs
+        # 合并其他 Context 的 rule_outputs、data_registry 和 audit_logs
         for ctx in contexts[1:]:
             merged_ctx.rule_outputs.update(ctx.rule_outputs)
+            merged_ctx.data_registry.update(ctx.data_registry)  # ⭐ 修复：合并 data_registry
             merged_ctx.audit_logs.extend(ctx.audit_logs)
         
-        self.log.info(f"✅ Merged context: {len(merged_ctx.rule_outputs)} rule outputs")
+        self.log.info(f"✅ Merged context: {len(merged_ctx.rule_outputs)} rule outputs, {len(merged_ctx.data_registry)} data refs")
         
         return merged_ctx
     
@@ -127,6 +128,11 @@ class ContextAggregatorOperator(BaseGovernanceOperator):
         
         # 4. 打印最终统计
         self.log.info(f"✅ Aggregation completed: {len(ctx.alerts)} alerts, {len(ctx.assets)} assets")
+        
+        # 5. 推送 GovernanceContext 到 XCom（供 save_assets_to_queue 使用）
+        ctx_json = ctx.to_json()
+        context['ti'].xcom_push(key='governance_context', value=ctx_json)
+        self.log.info(f"📤 Pushed GovernanceContext to XCom (key='governance_context')")
     
     def _process_p0_alerts(self, ctx: GovernanceContext) -> None:
         """
@@ -202,6 +208,7 @@ class ContextAggregatorOperator(BaseGovernanceOperator):
                             ctx.add_asset(
                                 asset_id=row['cycle_id'],
                                 asset_type="HIGH_VALUE_SCENARIO",  # 可从配置读取
+                                rule_id=rule_id,  # 添加规则ID
                                 vehicle_id=row['vehicle_id'],
                                 start_ts=str(row['start_time']),
                                 end_ts=str(row['end_time']),

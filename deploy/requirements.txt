@@ -5,3 +5,5 @@ pandera==0.19.3
 influxdb-client
 psycopg2-binary
 apache-airflow-providers-postgres
+pydantic>=2.0.0
+pytest>=7.0.0

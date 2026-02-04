@@ -23,6 +23,8 @@ DAG 结构：
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.utils.task_group import TaskGroup
+from airflow.operators.python import PythonOperator
+from airflow.providers.mysql.hooks.mysql import MySqlHook
 
 # 导入自定义算子
 from plugins.operators.loader import UniversalLoaderOperator
@@ -34,11 +36,14 @@ from plugins.operators.dispatcher import NotificationDispatcherOperator
 # 导入规则扫描器
 from plugins.orchestration.rule_scanner import RuleScanner
 
+# 导入 Dataset（用于触发 DAG B）
+from plugins.datasets import GOVERNANCE_ASSET_DATASET
+
 # ============================================================
 # DAG 默认配置
 # ============================================================
 default_args = {
-    'owner': 'data-governance',
+    'owner': 'box_admin',
     'depends_on_past': False,
     'email_on_failure': True,
     'email_on_retry': False,
@@ -167,8 +172,157 @@ with DAG(
     aggregator_task >> dispatcher_task
     
     # ========================================================================
+    # Task 6: Save Assets to Queue
+    # 将 P1 资产写入打包队列，触发 DAG B
+    # ========================================================================
+    def save_assets_to_queue(**context):
+        """
+        将 P1 资产标记为待打包（单表方案）
+        
+        逻辑：
+        1. 从 Context 读取 AssetItem 列表
+        2. 写入 auto_test_case_catalog 表，状态为 PENDING
+        3. 触发 Dataset，启动 DAG B
+        """
+        import logging
+        from plugins.domian.context import GovernanceContext
+        
+        logger = logging.getLogger(__name__)
+        
+        # 1. 恢复 GovernanceContext
+        try:
+            # 优先从 'governance_context' key 读取，fallback 到 'return_value'
+            ctx_json = context['ti'].xcom_pull(task_ids='context_aggregator', key='governance_context')
+            
+            if not ctx_json:
+                # Fallback: 尝试从 return_value 读取
+                ctx_json = context['ti'].xcom_pull(task_ids='context_aggregator')
+                if ctx_json:
+                    logger.info("📥 Retrieved GovernanceContext from return_value (fallback)")
+            else:
+                logger.info("📥 Retrieved GovernanceContext from 'governance_context' key")
+            
+            if not ctx_json:
+                logger.warning("⚠️ No GovernanceContext found in XCom, skipping asset queue write")
+                logger.info("ℹ️  This is normal if no P1 assets were identified in this run")
+                return
+            
+            ctx = GovernanceContext.from_json(ctx_json)
+            assets = ctx.assets
+            
+            # 调试信息
+            logger.info(f"📊 Context Summary: batch_id={ctx.batch_id}, "
+                       f"alerts={len(ctx.alerts)}, assets={len(ctx.assets)}, "
+                       f"rules_executed={len(ctx.rule_outputs)}")
+            
+            if not assets:
+                logger.info("✅ No P1 assets identified in this run, skipping queue write")
+                logger.info("ℹ️  Check rule execution logs to verify P1 rules ran successfully")
+                return
+            
+            logger.info(f"📦 Found {len(assets)} P1 assets to save to queue:")
+            for i, asset in enumerate(assets, 1):
+                logger.info(f"   {i}. asset_id={asset.asset_id}, rule={asset.rule_id}, vehicle={asset.vehicle_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to restore GovernanceContext: {str(e)}")
+            raise
+        
+        # 2. 写入数据库（单表方案：直接写入 meta 表，状态为 PENDING）
+        hook = MySqlHook(mysql_conn_id='qa_mysql_conn')
+        
+        # SQL: 写入元数据表（初始状态 IDENTIFIED）并标记为 PENDING
+        meta_insert_sql = """
+            INSERT INTO auto_test_case_catalog 
+            (batch_id, cycle_id, vehicle_id, shift_date, rule_version, 
+             category, case_tags, severity, 
+             trigger_timestamp, time_window_start, time_window_end, 
+             triggered_rule_id, process_status, pack_base_path, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'PENDING', %s, NOW())
+            ON DUPLICATE KEY UPDATE 
+                process_status = CASE 
+                    WHEN process_status IN ('IDENTIFIED', 'ABANDONED') THEN 'PENDING'  -- 重置为待打包
+                    ELSE process_status  -- 保持原状态（不覆盖 PACKAGED 等后续状态）
+                END,
+                triggered_rule_id = VALUES(triggered_rule_id),
+                pack_base_path = VALUES(pack_base_path),
+                pack_retry_count = 0,
+                pack_error_message = NULL,
+                updated_at = NOW()
+        """
+        
+        batch_id = ctx.batch_id
+        meta_success = 0
+        
+        for asset in assets:
+            try:
+                # 从 AssetItem 提取字段
+                asset_id = asset.asset_id
+                rule_id = asset.rule_id
+                vehicle_id = asset.vehicle_id
+                asset_type = asset.asset_type
+                
+                # 从 time_window 提取时间范围
+                time_window = asset.time_window or {}
+                start_time_str = time_window.get('start', datetime.now().isoformat())
+                end_time_str = time_window.get('end', datetime.now().isoformat())
+                
+                # 解析时间字符串为 datetime 对象
+                if isinstance(start_time_str, str):
+                    start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                else:
+                    start_time = start_time_str
+                    
+                if isinstance(end_time_str, str):
+                    end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+                else:
+                    end_time = end_time_str
+                
+                # 使用 AssetItem 中定义的 target_storage_path
+                base_path = asset.target_storage_path or f'/data/assets/{rule_id}/'
+                
+                # 插入元数据表（单表方案：直接写入 PENDING 状态）
+                import json
+                hook.run(meta_insert_sql, parameters=(
+                    batch_id,                           # batch_id
+                    asset_id,                           # cycle_id
+                    vehicle_id,                         # vehicle_id
+                    start_time.date(),                  # shift_date
+                    'v1.0',                             # rule_version
+                    'CornerCase',                       # category
+                    json.dumps(asset.tags),             # case_tags (JSON)
+                    'P1',                               # severity (P1资产)
+                    start_time,                         # trigger_timestamp
+                    start_time,                         # time_window_start
+                    end_time,                           # time_window_end
+                    rule_id,                            # triggered_rule_id
+                    base_path,                          # pack_base_path
+                ))
+                meta_success += 1
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to save asset {asset.asset_id}: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                continue
+        
+        logger.info(f"✅ Saved to meta table (PENDING status): {meta_success}/{len(assets)} assets")
+        
+        # 3. 推送统计信息到 XCom
+        context['ti'].xcom_push(key='assets_marked_pending', value=meta_success)
+    
+    save_assets_task = PythonOperator(
+        task_id='save_assets_to_queue',
+        python_callable=save_assets_to_queue,
+        outlets=[GOVERNANCE_ASSET_DATASET],  # 声明 Dataset 输出，触发 DAG B
+    )
+    
+    # 设置依赖：Dispatcher -> Save Assets
+    dispatcher_task >> save_assets_task
+    
+    # ========================================================================
     # 线性依赖关系（已在上面设置）
-    # Loader -> Adapter -> [Rule Tasks] -> Aggregator -> Dispatcher
+    # Loader -> Adapter -> [Rule Tasks] -> Aggregator -> Dispatcher -> Save Assets
     # ========================================================================
     loader_task >> adapter_task
 
