@@ -31,6 +31,7 @@ extractions:
       ORDER BY end_time DESC
       LIMIT 100  -- 仅抽取最新100条用于测试
     output_key: "raw_cycle_section"
+    alt_key: null
 
   - id: "raw_vehicle_sample"
     source_type: "mysql"
@@ -40,6 +41,7 @@ extractions:
       ORDER BY shift_date DESC
       LIMIT 100
     output_key: "raw_vehicle_cycle"
+    alt_key: null
 
 default_args:
   retries: 1  # 手动任务失败不自动重试

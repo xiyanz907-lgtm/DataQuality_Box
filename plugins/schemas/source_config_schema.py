@@ -98,6 +98,8 @@ class ExtractionConfig(BaseModel):
     bucket: Optional[str] = Field(None, description="桶名 (适用于对象存储)")
     key: Optional[str] = Field(None, description="对象键 (适用于对象存储)")
     output_key: str = Field(..., description="输出到Context的key")
+    alt_key: Optional[str] = Field(None, description="备用键名 (可选)")
+    alt_key: Optional[str] = Field(None, description="备用key")
 
 
 class DefaultArgsConfig(BaseModel):

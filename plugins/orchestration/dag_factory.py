@@ -206,7 +206,7 @@ class DAGFactory:
         adapter = DomainAdapterOperator(
             task_id="domain_adapter",
             config_path=str(adapter_config_path),
-            upstream_task_ids=["universal_loader"],
+            upstream_task_id="universal_loader",
             dag=dag
         )
         prev_task >> adapter
@@ -227,15 +227,31 @@ class DAGFactory:
         
         # 创建规则任务组
         with TaskGroup(group_id="rule_tasks", dag=dag) as rule_group:
-            rule_tasks = []
+            rule_tasks_dict = {}  # 使用字典，方便建立依赖关系
+            
+            # Step 4.1: 创建所有规则任务
             for rule in target_rules:
                 rule_task = GenericRuleOperator(
                     task_id=rule['rule_id'],
-                    rule_config=rule,
-                    upstream_task_ids=["domain_adapter"],
+                    config_dict=rule['config'],  # 传递完整的 YAML 配置
+                    upstream_task_id="domain_adapter",
                     dag=dag
                 )
-                rule_tasks.append(rule_task)
+                rule_tasks_dict[rule['rule_id']] = rule_task
+            
+            # Step 4.2: 设置规则之间的依赖关系
+            for rule in target_rules:
+                rule_id = rule['rule_id']
+                depends_on = rule.get('depends_on', [])
+                
+                if depends_on:
+                    logger.info(f"📌 Setting dependencies for {rule_id}: {depends_on}")
+                    for dep_rule_id in depends_on:
+                        if dep_rule_id in rule_tasks_dict:
+                            # 建立依赖：依赖规则 >> 当前规则
+                            rule_tasks_dict[dep_rule_id] >> rule_tasks_dict[rule_id]
+                        else:
+                            logger.warning(f"⚠️ Rule '{rule_id}' depends on '{dep_rule_id}', but not found!")
         
         adapter >> rule_group
         
@@ -250,7 +266,7 @@ class DAGFactory:
         # ========== Step 6: Notification Dispatcher ==========
         dispatcher = NotificationDispatcherOperator(
             task_id="notification_dispatcher",
-            upstream_task_ids=["context_aggregator"],
+            upstream_task_id="context_aggregator",
             dag=dag
         )
         aggregator >> dispatcher

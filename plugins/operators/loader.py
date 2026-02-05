@@ -141,16 +141,23 @@ class UniversalLoaderOperator(BaseGovernanceOperator):
             Polars DataFrame
         """
         # 1. 渲染 SQL（处理 Jinja 模板）
-        sql_template = task['sql']
+        # 支持 'query' 和 'sql' 字段（兼容不同配置格式）
+        sql_template = task.get('query') or task.get('sql')
+        if not sql_template:
+            raise ValueError(f"Missing 'query' or 'sql' field in extraction config: {task.get('id')}")
+        
         sql = self._render_sql(sql_template, context)
         
         self.log.info(f"Rendered SQL: {sql[:200]}...")  # 打印前200字符
         
         # 2. 根据数据源类型抽取
-        source_type = source_meta.get('type', 'mysql')
+        source_type = task.get('source_type', 'mysql')
         
         if source_type == 'mysql':
-            return self._extract_from_mysql(sql, source_meta)
+            return self._extract_from_mysql(sql, task)
+        elif source_type == 'postgresql':
+            # 预留：PostgreSQL 抽取逻辑
+            raise NotImplementedError("PostgreSQL support not implemented yet")
         elif source_type == 'influxdb':
             # 预留：InfluxDB 抽取逻辑
             raise NotImplementedError("InfluxDB support not implemented yet")
@@ -160,7 +167,7 @@ class UniversalLoaderOperator(BaseGovernanceOperator):
     def _extract_from_mysql(
         self, 
         sql: str, 
-        source_meta: Dict[str, Any]
+        task: Dict[str, Any]
     ) -> pl.DataFrame:
         """
         从 MySQL 抽取数据（使用 Airflow Hook + Pandas 中转）
@@ -170,12 +177,15 @@ class UniversalLoaderOperator(BaseGovernanceOperator):
         
         Args:
             sql: 渲染后的 SQL
-            source_meta: 数据源元信息
+            task: 抽取任务配置（包含 conn_id）
         
         Returns:
             Polars DataFrame
         """
-        connection_id = source_meta['connection_id']
+        # 支持 'conn_id' 和 'connection_id' 字段（兼容不同配置格式）
+        connection_id = task.get('conn_id') or task.get('connection_id')
+        if not connection_id:
+            raise ValueError(f"Missing 'conn_id' or 'connection_id' in extraction task: {task.get('id')}")
         
         try:
             # 1. 使用 MySqlHook 获取 Pandas DataFrame

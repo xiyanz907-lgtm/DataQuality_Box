@@ -52,6 +52,7 @@ extractions:
       ORDER BY trigger_timestamp DESC
       LIMIT 1000
     output_key: "raw_packaged_assets"
+    alt_key: null
 
 default_args:
   retries: 2

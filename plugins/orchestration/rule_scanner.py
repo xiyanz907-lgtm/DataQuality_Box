@@ -143,6 +143,7 @@ class RuleScanner:
             'depends_on': config.get('depends_on', []),
             'severity': config['meta']['severity'],
             'description': config['meta'].get('description', ''),
+            'target_entity': config.get('target_entity'),
             'config': config  # 完整配置（供调试）
         }
     
