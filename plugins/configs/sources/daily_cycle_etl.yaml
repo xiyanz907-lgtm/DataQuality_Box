@@ -65,3 +65,9 @@ default_args:
   retries: 3
   retry_delay_minutes: 10
   email: ["xiyan.zhou@westwell-lab.com"]
+
+# 资产打包配置（可选，默认启用）
+asset_packing:
+  enabled: true  # 是否保存 P1 资产到数据库队列
+  conn_id: "qa_mysql_conn"  # 数据库连接ID
+  table: "auto_test_case_catalog"  # 元数据表名
