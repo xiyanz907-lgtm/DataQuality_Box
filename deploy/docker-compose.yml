@@ -28,7 +28,7 @@ services:
 
   # Airflow
   airflow:
-    image: airflow-custom:2.7.1  # 使用预构建的镜像，不再 build
+    image: airflow-custom:2.10.4  # 使用预构建的镜像，不再 build
     command: bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_ADMIN_USER} --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL} --password ${AIRFLOW_ADMIN_PASSWORD} 2>/dev/null || true && (airflow scheduler & airflow webserver)"
     environment:
       - TZ=${SITE_TIMEZONE}  #挂载宿主机时间
@@ -104,7 +104,7 @@ services:
       - PARQUET_COMPRESSION_ENTITY=${PARQUET_COMPRESSION_ENTITY}
       - PARQUET_COMPRESSION_RESULT=${PARQUET_COMPRESSION_RESULT}
 
-           #  【注入资产打包服务配置】⭐ 生产环境必须修改
+           #  【注入资产打包服务配置】
       - PACKING_SERVICE_BASE_URL=${PACKING_SERVICE_BASE_URL}
       - PACKING_SERVICE_PACK_ENDPOINT=${PACKING_SERVICE_PACK_ENDPOINT}
       - PACKING_SERVICE_QUERY_ENDPOINT=${PACKING_SERVICE_QUERY_ENDPOINT}

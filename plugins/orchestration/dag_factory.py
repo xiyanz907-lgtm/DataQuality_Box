@@ -17,6 +17,7 @@ from airflow.sensors.filesystem import FileSensor
 from airflow.sensors.time_delta import TimeDeltaSensor
 from airflow.sensors.external_task import ExternalTaskSensor
 from airflow.utils.task_group import TaskGroup
+from airflow.providers.mysql.hooks.mysql import MySqlHook
 
 from plugins.schemas.source_config_schema import SourceYAMLConfig
 from plugins.operators.loader import UniversalLoaderOperator
@@ -25,6 +26,7 @@ from plugins.operators.rule_engine import GenericRuleOperator
 from plugins.operators.aggregator import ContextAggregatorOperator
 from plugins.operators.dispatcher import NotificationDispatcherOperator
 from plugins.orchestration.rule_scanner import RuleScanner
+from plugins.datasets import GOVERNANCE_ASSET_DATASET
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +272,121 @@ class DAGFactory:
             dag=dag
         )
         aggregator >> dispatcher
+        
+        # ========== Step 7: Save Assets to Queue (触发 DAG B) ==========
+        # 根据 asset_packing 配置决定是否添加此任务
+        if config.asset_packing and config.asset_packing.enabled:
+            asset_config = config.asset_packing
+            logger.info(f"📦 Enabling asset packing: conn_id={asset_config.conn_id}, table={asset_config.table}")
+            
+            def save_assets_to_queue(conn_id: str, table_name: str, **context):
+                """将 P1 资产写入数据库队列，触发 DAG B"""
+                from datetime import datetime
+                from airflow.providers.mysql.hooks.mysql import MySqlHook
+                from plugins.domian.context import GovernanceContext
+                import json
+                
+                logger = context['task_instance'].log
+                
+                # 1. 从 XCom 恢复 GovernanceContext
+                aggregator_ti = context['ti']
+                ctx_json = aggregator_ti.xcom_pull(task_ids='context_aggregator', key='governance_context')
+                
+                if not ctx_json:
+                    logger.warning("⚠️ No GovernanceContext found, skipping asset save")
+                    return
+                
+                ctx = GovernanceContext.from_json(ctx_json)
+                assets = ctx.assets
+                
+                if not assets:
+                    logger.info("ℹ️ No assets to save")
+                    return
+                
+                logger.info(f"📦 Found {len(assets)} assets to save")
+                
+                # 2. 连接数据库
+                hook = MySqlHook(mysql_conn_id=conn_id)
+                
+                # SQL: 插入元数据表（单表方案）
+                meta_insert_sql = f"""
+                    INSERT INTO {table_name} (
+                    batch_id, cycle_id, vehicle_id, shift_date, rule_version,
+                    category, case_tags, severity, trigger_timestamp,
+                    time_window_start, time_window_end, triggered_rule_id,
+                    pack_base_path, process_status
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'PENDING')
+                """
+                
+                # 3. 批量插入
+                batch_id = ctx.batch_id or f"BATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                meta_success = 0
+                
+                for asset in assets:
+                    try:
+                        asset_id = asset.asset_id
+                        vehicle_id = asset.vehicle_id or 'UNKNOWN'
+                        rule_id = asset.rule_id or 'UNKNOWN'
+                        
+                        # 从 time_window 提取时间范围
+                        time_window = asset.time_window or {}
+                        start_time_str = time_window.get('start', datetime.now().isoformat())
+                        end_time_str = time_window.get('end', datetime.now().isoformat())
+                        
+                        # 解析时间字符串
+                        if isinstance(start_time_str, str):
+                            start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                        else:
+                            start_time = start_time_str
+                            
+                        if isinstance(end_time_str, str):
+                            end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+                        else:
+                            end_time = end_time_str
+                        
+                        base_path = asset.target_storage_path or f'/data/assets/{rule_id}/'
+                        
+                        # 插入数据库
+                        hook.run(meta_insert_sql, parameters=(
+                            batch_id,
+                            asset_id,
+                            vehicle_id,
+                            start_time.date(),
+                            'v1.0',
+                            'CornerCase',
+                            json.dumps(asset.tags),
+                            'P1',
+                            start_time,
+                            start_time,
+                            end_time,
+                            rule_id,
+                            base_path,
+                        ))
+                        meta_success += 1
+                        
+                    except Exception as e:
+                        logger.error(f"❌ Failed to save asset {asset.asset_id}: {str(e)}")
+                        continue
+                
+                logger.info(f"✅ Saved {meta_success}/{len(assets)} assets to queue (PENDING status)")
+                context['ti'].xcom_push(key='assets_marked_pending', value=meta_success)
+            
+            # 创建 PythonOperator任务
+            save_assets_task = PythonOperator(
+                task_id='save_assets_to_queue',
+                python_callable=save_assets_to_queue,
+                op_kwargs={
+                    'conn_id': asset_config.conn_id,
+                    'table_name': asset_config.table
+                },
+                outlets=[GOVERNANCE_ASSET_DATASET],  # 声明 Dataset 输出，触发 DAG B
+                dag=dag
+            )
+            
+            # 设置依赖：Dispatcher -> Save Assets
+            dispatcher >> save_assets_task
+        else:
+            logger.info("📭 Asset packing disabled, skipping save_assets_to_queue task")
     
     def _create_sensor_task(self, sensor_config: Any, task_id: str):
         """根据 sensor 配置创建对应的 Sensor Task"""

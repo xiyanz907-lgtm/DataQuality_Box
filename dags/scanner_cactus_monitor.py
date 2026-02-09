@@ -26,7 +26,7 @@ with DAG(
     'scanner_cactus_monitor',
     default_args=default_args,
     description='Monitor Cactus (cnt_cycles) changes and trigger reconciliation for unmatched data',
-    schedule_interval='@hourly',
+    schedule='@hourly',
     start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
     catchup=False,
     tags=['monitor', 'cactus', 'reconciliation'],

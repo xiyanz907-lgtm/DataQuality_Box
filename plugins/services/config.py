@@ -11,7 +11,8 @@ CONN_ID_CACTUS = "cactus_mysql_conn"
 # DataLog (开发库) 连接 ID
 # 用于 NGen vs DataLog 对账（DQ v1），库名通常为 dagster_pipelines
 CONN_ID_DATALOG = "datalog_mysql_conn"
-
+# QA (测试元数据库) 连接 ID
+CONN_ID_QA = "qa_mysql_conn"
 # 表级配置中心（可按需扩展新表）
 TABLE_CONFIGS = {
     "cnt_cycles": {

@@ -2,9 +2,9 @@ import logging
 from datetime import datetime, timedelta
 import pandas as pd
 import os
+import pendulum
 from airflow import DAG
 from airflow.decorators import task
-from airflow.utils.dates import days_ago
 from airflow.utils.email import send_email
 from services.config import CONN_ID_CACTUS, CONN_ID_NGEN
 
@@ -32,8 +32,8 @@ with DAG(
     dag_id='reconciliation_worker',
     default_args=default_args,
     description='Worker DAG for data reconciliation, triggered by scanner',
-    schedule_interval=None, # 被动触发
-    start_date=days_ago(1),
+    schedule=None, # 被动触发
+    start_date=pendulum.today('UTC').add(days=-1),
     catchup=False,
     is_paused_upon_creation=False,
     max_active_runs=1, # 防止并发冲突

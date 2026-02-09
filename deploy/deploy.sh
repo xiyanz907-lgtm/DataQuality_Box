@@ -28,7 +28,7 @@ echo -e "${GREEN}✓ Docker环境正常${NC}"
 
 # 检查镜像是否存在
 echo -e "${YELLOW}[2/6]${NC} 检查Docker镜像..."
-IMAGE_NAME="airflow-custom:2.7.1"
+IMAGE_NAME="airflow-custom:2.10.4"
 
 if ! docker images ${IMAGE_NAME} --format "{{.Repository}}:{{.Tag}}" | grep -q "^${IMAGE_NAME}$"; then
     echo -e "${RED}❌ 镜像 ${IMAGE_NAME} 不存在${NC}"
@@ -53,8 +53,10 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# 加载环境变量
-source .env
+# 安全加载环境变量：将未加引号的值自动加引号，防止含空格/特殊字符的值（如 JWT Token）被 bash 误解释
+set -a
+source <(grep -v '^\s*#' .env | sed 's/\r$//' | sed '/^$/d' | sed 's/=\(.*\)/="\1"/')
+set +a
 echo -e "${GREEN}✓ 配置文件检查完成${NC}"
 
 # 创建必要目录

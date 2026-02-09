@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # 镜像配置
 IMAGE_NAME="airflow-custom"
-IMAGE_TAG="2.7.1"
+IMAGE_TAG="2.10.4"
 FULL_IMAGE_NAME="${IMAGE_NAME}:${IMAGE_TAG}"
 
 # 检查Docker

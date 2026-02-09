@@ -112,12 +112,23 @@ class DefaultArgsConfig(BaseModel):
     retry_delay_minutes: Optional[int] = None
 
 
+class AssetPackingConfig(BaseModel):
+    """资产打包配置"""
+    enabled: bool = True  # 是否启用资产保存
+    conn_id: str = Field(default="qa_mysql_conn", description="数据库连接ID")
+    table: str = Field(default="auto_test_case_catalog", description="资产元数据表名")
+
+
 class SourceYAMLConfig(BaseModel):
     """完整的 Source YAML 配置"""
     source_meta: SourceMetaConfig
     scheduling: SchedulingConfig
     extractions: List[ExtractionConfig] = Field(..., min_items=1)
     default_args: Optional[DefaultArgsConfig] = None
+    asset_packing: Optional[AssetPackingConfig] = Field(
+        default_factory=lambda: AssetPackingConfig(),
+        description="资产打包配置（可选，默认启用）"
+    )
     
     class Config:
         extra = 'forbid'  # 禁止未定义字段
