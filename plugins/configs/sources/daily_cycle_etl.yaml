@@ -14,7 +14,7 @@ source_meta:
 # 调度策略
 scheduling:
   trigger_mode: "CRON"
-  cron_expression: "0 14 * * *"  # 每天下午2点（当地时间）
+  cron_expression: "0 14 * * *"  # 每天上午十点（当地时间）检查前一天的数据
   
   # 可选：前置传感器，确保上游数据就绪
   sensor:
@@ -23,7 +23,7 @@ scheduling:
     sql: |
       SELECT COUNT(*) >= 1
       FROM cycle_section_summary
-      WHERE DATE(shift_date) = CURDATE()
+      WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
     conn_id: "datalog_mysql_conn"
     timeout: 1800      # 30分钟超时
     poke_interval: 300  # 每5分钟检查一次
@@ -48,7 +48,7 @@ extractions:
         mileage,
         power_consumption
       FROM cycle_section_summary
-      WHERE DATE(shift_date) = CURDATE()
+      WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
     output_key: "raw_cycle_section"
     alt_key: null
 
@@ -77,7 +77,7 @@ extractions:
         PAGE_TIME_7_SUBTASK AS page_time_7_subtask,
         PAGE_TIME_8_SUBTASK AS page_time_8_subtask
       FROM subtarget_vehicle_cycle
-      WHERE DATE(shift_date) = CURDATE()
+      WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
     output_key: "raw_cycle_subtarget"
     alt_key: null
 
@@ -97,7 +97,7 @@ extractions:
         (power_consumption/mileage) as power_per_km,
         idle as idle_time
       FROM daily_cycle_overall
-      WHERE DATE(shift_date) = CURDATE()
+      WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
     output_key: "raw_cycle_summary"
     alt_key: null
 

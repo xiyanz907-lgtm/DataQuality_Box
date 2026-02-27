@@ -72,10 +72,10 @@ class Cycle:
     daily_avg_power_per_box: float         # AVG(power_per_box) OVER (shift_date) — 同天平均每个box电耗
 
     # --- 差异字段 ---
-   diff_box_count1: int          # Checkpoint log和Cycle log箱数差异
-   diff_box_count2: int          # Checkpoint log和Daily_report箱数差异
-   diff_mileage: float          # Checkpoint log和Daily_report作业里程差异（km）
-   
+    diff_box_count1: int          # Checkpoint log和Cycle log箱数差异
+    diff_box_count2: int          # Checkpoint log和Daily_report箱数差异
+    diff_mileage: float          # Checkpoint log和Daily_report作业里程差异（km）
+
     # --- 扩展属性 ---
     # 存放非标字段或一致性校验的 Diff (e.g. {"mileage_diff": 0.5})
     extra_attributes: Dict[str, any]
