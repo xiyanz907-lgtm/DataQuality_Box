@@ -41,12 +41,12 @@ extractions:
   # 任务 2：抽取 subtarget_vehicle_cycle 表
   # ========================================
   - id: "subtarget_vehicle_cycle"
-    output_key: "raw_vehicle_cycle"
+    output_key: "raw_cycle_subtarget"
     sql: |
       SELECT
         TRACTOR_CYCLE_ID AS cycle_id,          -- 字段重命名
         TWIN_LIFT_INDICATOR AS is_twin_lift,
-        BOX AS box_count
+        BOX AS box
       FROM subtarget_vehicle_cycle
       WHERE DATE(shift_date) = '{{ ds }}'     -- 根据实际日期字段调整
     alt_key: null

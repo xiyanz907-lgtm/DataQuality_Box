@@ -1,0 +1,32 @@
+# 每个box电耗不能超过30kwh
+meta:
+  rule_id: rule_p0_kwh_per_box
+  severity: P0
+  description: "每个box电耗校验：识别每个box电耗异常的数据"
+  owner: data-governance@example.com
+  created_at: "2026-02-06"
+
+# 目标实体
+target_entity: Cycle
+
+# 输入数据（从 Context 读取）
+input:
+  key: entity_cycle  # 引用 Adapter 写入的实体数据
+
+# 规则逻辑（Polars 表达式）
+logic:
+  filter_expr: "pl.col('daily_avg_power_per_box') > 30"
+
+# 输出配置
+output:
+  key: rule_p0_kwh_per_box_hits  # 写入 Context 的 key
+  stage: RESULT                  # 数据阶段
+
+# 告警配置
+alert:
+  enabled: true
+  template: "[daily]每个box电耗异常: {trigger_cycle_ids}"
+  title: "P0 告警：每个box电耗校验"
+
+# 依赖关系（此规则不依赖其他规则）
+depends_on: []

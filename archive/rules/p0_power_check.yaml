@@ -1,0 +1,40 @@
+# p0_power_check.yaml
+# 规则配置文件：P0 - 电耗合规
+#
+# 功能：检测单圈电耗大于 50 
+# 治理等级：P0 (Blocker)
+# 处理方式：阻断、报警、修复
+
+# 规则元信息
+meta:
+  rule_id: rule_p0_power_check
+  severity: P0
+  description: "能耗校验：检测 单圈电耗大于 50 的异常数据"
+  owner: data-governance@example.com
+  created_at: "2026-02-06"
+
+# 目标实体
+target_entity: Cycle
+
+# 输入数据（从 Context 读取）
+input:
+  key: entity_cycle  # 引用 Adapter 写入的实体数据
+
+# 规则逻辑（Polars 表达式）
+logic:
+  # 过滤条件：end_time < start_time
+  filter_expr: "pl.col('power_consumption') > 50"
+
+# 输出配置
+output:
+  key: rule_p0_power_check_hits  # 写入 Context 的 key
+  stage: RESULT                  # 数据阶段
+
+# 告警配置
+alert:
+  enabled: true
+  template: "能耗异常: {trigger_cycle_ids}"
+  title: "P0 告警：能耗异常检测"
+
+# 依赖关系（此规则不依赖其他规则）
+depends_on: []

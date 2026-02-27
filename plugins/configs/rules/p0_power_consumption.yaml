@@ -1,0 +1,40 @@
+# p1_twin_lift.yaml
+# 规则配置文件：P1 - 双箱作业挖掘
+#
+# 功能：识别 is_twin_lift == 1 的高价值特征数据
+# 治理等级：P1 (Asset)
+# 处理方式：打标、豁免、打包
+
+# 规则元信息
+meta:
+  rule_id: rule_p1_power_consumption
+  severity: P0
+  description: "功率消耗校验：识别电耗异常的数据"
+  owner: data-governance@example.com
+  created_at: "2026-02-06"
+
+# 目标实体
+target_entity: Cycle
+
+# 输入数据（从 Context 读取）
+input:
+  key: entity_cycle  # 引用 Adapter 写入的实体数据
+
+# 规则逻辑（Polars 表达式）
+logic:
+  # 过滤条件：power_consumption > 50
+  filter_expr: "pl.col('power_consumption') > 50"
+
+# 输出配置
+output:
+  key: rule_p1_power_consumption_hits  # 写入 Context 的 key
+  stage: RESULT                 # 数据阶段
+
+# 告警配置
+alert:
+  enabled: true
+  template: "功率消耗异常: {trigger_cycle_ids}"
+  title: "P0 告警：功率消耗校验"
+
+# 依赖关系（此规则不依赖其他规则）
+depends_on: []

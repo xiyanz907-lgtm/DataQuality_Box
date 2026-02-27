@@ -17,21 +17,32 @@ input_schema:
   
   # Join 配置（可选）
   joins:
-    - join_source: "raw_vehicle_cycle"  # 要 Join 的数据源
+    - join_source: "raw_cycle_subtarget"  # 要 Join 的数据源
       type: "left"                      # Join 类型: left, inner, outer
       left_on: "cycle_id"               # 左表连接字段
       right_on: "cycle_id"              # 右表连接字段（sources.yaml 中已重命名）
-      suffix: "_vehicle"                # 右表字段后缀（防止列名冲突）
-
+      suffix: "_subtarget"                # 右表字段后缀（防止列名冲突）
+    
+    - join_source: "raw_cycle_summary"  # 要 Join 的数据源
+      type: "left"
+      left_on: "cycle_id"
+      right_on: "cycle_id"
+      suffix: "_summary"
 # 字段映射（列表格式，每个字段一个配置）
 fields:
-  # 1. 直接映射字段（从主表 section）
+  # 1. 从主表 cycle_section_summary 表获取字段
+  - target: "vehicle_id"
+    source_expr: "col('vehicle_id')"
+
   - target: "cycle_id"
     source_expr: "col('cycle_id')"
   
-  - target: "vehicle_id"
-    source_expr: "col('vehicle_id')"
-  
+  - target: "box"
+    source_expr: "col('box')"
+
+  - target: "shift_date"
+    source_expr: "col('shift_date')"
+
   - target: "start_time"
     source_expr: "col('start_time')"
   
@@ -44,20 +55,154 @@ fields:
   - target: "task_type"
     source_expr: "col('task_type')"
   
-  # 2. 从 Join 的右表获取字段（vehicle 表）
-  # 注意：如果字段名不重复，Polars 不会添加后缀
+  - target: "running_time"
+    source_expr: "col('running_time')"
+  
+  - target: "mileage"
+    source_expr: "col('mileage')"
+
+  - target: "power_consumption"
+    source_expr: "col('power_consumption')"
+
+  # 2. 从 subtarget_vehicle_cycle 表获取字段
+  # 注：如果字段名不重复，Polars 不会添加后缀
+
   - target: "is_twin_lift"
     source_expr: "col('is_twin_lift').fill_null(0)"  # 处理空值
   
-  - target: "box_count"
-    source_expr: "col('box_count').fill_null(0)"     # 处理空值
+  - target: "subtask_type_1"
+    source_expr: "col('subtask_type_1')"
   
-  # 3. 扩展属性（JSON 格式）
+  - target: "page_time_1_subtask"
+    source_expr: "col('page_time_1_subtask')"
+  
+  - target: "subtask_type_2"
+    source_expr: "col('subtask_type_2')"
+  
+  - target: "page_time_2_subtask"
+    source_expr: "col('page_time_2_subtask')"
+  
+  - target: "subtask_type_3"
+    source_expr: "col('subtask_type_3')"
+  
+  - target: "page_time_3_subtask"
+    source_expr: "col('page_time_3_subtask')"
+  
+  - target: "subtask_type_4"
+    source_expr: "col('subtask_type_4')"
+  
+  - target: "page_time_4_subtask"
+    source_expr: "col('page_time_4_subtask')"
+  
+  - target: "subtask_type_5"
+    source_expr: "col('subtask_type_5')"
+  
+  - target: "page_time_5_subtask"
+    source_expr: "col('page_time_5_subtask')"
+  
+  - target: "subtask_type_6"
+    source_expr: "col('subtask_type_6')"
+  
+  - target: "page_time_6_subtask"
+    source_expr: "col('page_time_6_subtask')"
+  
+  - target: "subtask_type_7"
+    source_expr: "col('subtask_type_7')"
+  
+  - target: "page_time_7_subtask"
+    source_expr: "col('page_time_7_subtask')"
+  
+  - target: "subtask_type_8"
+    source_expr: "col('subtask_type_8')"
+  
+  - target: "page_time_8_subtask"
+    source_expr: "col('page_time_8_subtask')"
+
+  - target: "non_null_subtask_count"
+    source_expr: >
+      pl.sum_horizontal(
+        pl.col('subtask_type_1').is_not_null(),
+        pl.col('subtask_type_2').is_not_null(),
+        pl.col('subtask_type_3').is_not_null(),
+        pl.col('subtask_type_4').is_not_null(),
+        pl.col('subtask_type_5').is_not_null(),
+        pl.col('subtask_type_6').is_not_null(),
+        pl.col('subtask_type_7').is_not_null(),
+        pl.col('subtask_type_8').is_not_null(),
+      )
+
+  - target: "non_null_page_time_count"
+    source_expr: >
+      pl.sum_horizontal(
+        pl.col('page_time_1_subtask').is_not_null(),
+        pl.col('page_time_2_subtask').is_not_null(),
+        pl.col('page_time_3_subtask').is_not_null(),
+        pl.col('page_time_4_subtask').is_not_null(),
+        pl.col('page_time_5_subtask').is_not_null(),
+        pl.col('page_time_6_subtask').is_not_null(),
+        pl.col('page_time_7_subtask').is_not_null(),
+        pl.col('page_time_8_subtask').is_not_null(),
+      )
+
+  # 3. 从 cycle_section_summary 表获取字段
+
+  - target: "total_speed"
+    source_expr: "col('total_speed')"
+
+  - target: "total_travel_speed"
+    source_expr: "col('total_travel_speed')"
+
+  - target: "total_size"
+    source_expr: "col('total_size')"
+
+  - target: "mileage_all"
+    source_expr: "col('mileage_all')"
+
+  - target: "power_per_km"
+    source_expr: "col('power_per_km')"
+
+  - target: "power_per_box"
+    source_expr: "col('power_per_box')"
+
+  - target: "idle_time"
+    source_expr: "col('idle_time')"
+  
+  # 4. 差值字段
+  - target: "diff_box_count1"
+    source_expr: "col('box') - col('box_subtarget')"
+  
+  - target: "diff_box_count2"
+    source_expr: "col('box') - col('box_summary')"
+  
+  - target: "diff_mileage"
+    source_expr: "col('mileage') - col('mileage_summary')"
+
+
+  # 5. 组级聚合字段
+  - target: "daily_total_box"
+    source_expr: "col('box').sum().over('shift_date')"
+
+  - target: "daily_total_mileage"
+    source_expr: "col('mileage').sum().over('shift_date')"
+
+  - target: "daily_total_mileage_all"
+    source_expr: "col('mileage_all').sum().over('shift_date')"
+
+  - target: "daily_total_idle_time"
+    source_expr: "col('idle_time').sum().over('shift_date')"
+  
+  - target: "daily_avg_power_per_km"
+    source_expr: "col('power_per_km').mean().over('shift_date')"
+
+  - target: "daily_avg_power_per_box"
+    source_expr: "col('power_per_box').mean().over('shift_date')"
+
+  #  扩展属性（JSON 格式）
   - target: "extra_attributes"
     source_expr: "lit('{}')"  # 空字典，暂无扩展属性
 
 # 数据清洗规则（在映射之前应用，可选）
-# 注意：当前版本代码中可能未实现此功能，如遇错误可删除此段
+# 注：当前版本代码中未实现此功能
 # data_cleaning:
 #   drop_duplicates:
 #     - cycle_id
@@ -67,5 +212,5 @@ fields:
 #     - end_time
 #   fill_nulls:
 #     is_twin_lift: 0
-#     box_count: 0
+#     box: 0
 #     task_type: "UNKNOWN"

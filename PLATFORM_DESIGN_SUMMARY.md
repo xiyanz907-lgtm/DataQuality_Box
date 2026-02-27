@@ -162,7 +162,7 @@ Database (持久化)
 │   │   ├── key=raw_cycle_section/
 │   │   │   ├── part-00001-uuid-abc.parquet
 │   │   │   └── part-00002-uuid-def.parquet
-│   │   └── key=raw_vehicle_cycle/
+│   │   └── key=raw_cycle_subtarget/
 │   │       └── part-00001-uuid-ghi.parquet
 │   ├── stage=ENTITY/
 │   │   └── key=entity_cycle/
@@ -401,7 +401,7 @@ adapter_meta:
 input_schema:
   primary_source: "raw_cycle_section"
   joins:                             # 链式 JOIN
-    - join_source: "raw_vehicle_cycle"
+    - join_source: "raw_cycle_subtarget"
       type: "left"
       left_on: "cycle_id"
       right_on: "cycle_id"

@@ -277,39 +277,56 @@ class ReconciliationEngine:
             # Cactus: cnt01, cnt02, cnt03
             # 逻辑: 任意一边非空且相等
             
-            def check_container_match_expr():
-                # 辅助: 构造 Cactus 箱号列表列
-                return (
-                    pl.col("ref_cnt_large").is_in([pl.col("cnt01"), pl.col("cnt02"), pl.col("cnt03")]) |
-                    pl.col("ref_cnt_small_list").list.set_intersection(
-                        pl.concat_list([pl.col("cnt01"), pl.col("cnt02"), pl.col("cnt03")])
-                    ).list.len() > 0
+            # [Fix] Polars 0.19.x 的 list.set_intersection / is_in(List col)
+            # 在列表长度不一致或含 null 时会触发 PanicException: index out of bounds。
+            # 改用安全的标量比较 + explode 替代列表操作，匹配逻辑不变。
+            
+            # ---- 大箱匹配: ref_cnt_large vs cnt01/cnt02/cnt03 (标量比较) ----
+            large_match_expr = (
+                pl.col("ref_cnt_large").is_not_null() &
+                (pl.col("ref_cnt_large") != "") &
+                (
+                    (pl.col("ref_cnt_large") == pl.col("cnt01")) |
+                    (pl.col("ref_cnt_large") == pl.col("cnt02")) |
+                    (pl.col("ref_cnt_large") == pl.col("cnt03"))
                 )
-
-            # 由于 Polars 列表操作较复杂，这里简化逻辑：
-            # 只要 nGen 的 ref_cnt_large 等于 Cactus 的任一 cnt，或者 ref_cnt_small_list 中包含 Cactus 的任一 cnt
-            # 考虑到数据清洗质量，这里做简单的字符包含或相等检查
-            
-            # 暂时简化：只要时间对上，就认为是 Candidate，然后按时间最近排序取 Top 1
-            # 补充需求明确提到需要“箱号匹配”。
-            
-            # 实现箱号匹配过滤
-            # 1. 构造 Cactus 侧的箱号集合 (Array)
-            # 2. 检查交集
-            # [Fix] 预先处理 null 值，避免 concat_list 后 fill_null("") 导致的类型错误
-            
-            df_l2_checked = df_l2_time_ok.with_columns([
-                 pl.concat_list([
-                     pl.col("cnt01").fill_null(""), 
-                     pl.col("cnt02").fill_null(""), 
-                     pl.col("cnt03").fill_null("")
-                 ]).alias("cactus_cnts")
-            ]).filter(
-                (pl.col("ref_cnt_large").is_in(pl.col("cactus_cnts"))) |
-                (pl.col("ref_cnt_small_list").list.set_intersection(pl.col("cactus_cnts")).list.len() > 0)
             )
+            df_large_matched = df_l2_time_ok.filter(large_match_expr)
+            
+            # ---- 小箱匹配: explode ref_cnt_small_list 后逐元素标量比较 ----
+            df_large_miss = df_l2_time_ok.filter(large_match_expr.not_())
+            df_small_matched = pl.DataFrame()
+            
+            if not df_large_miss.is_empty():
+                _has_small = (
+                    pl.col("ref_cnt_small_list").is_not_null() &
+                    (pl.col("ref_cnt_small_list").list.len() > 0)
+                )
+                df_with_small = df_large_miss.filter(_has_small)
+                
+                if not df_with_small.is_empty():
+                    df_exploded = df_with_small.explode("ref_cnt_small_list")
+                    small_hit_expr = (
+                        pl.col("ref_cnt_small_list").is_not_null() &
+                        (
+                            (pl.col("ref_cnt_small_list") == pl.col("cnt01")) |
+                            (pl.col("ref_cnt_small_list") == pl.col("cnt02")) |
+                            (pl.col("ref_cnt_small_list") == pl.col("cnt03"))
+                        )
+                    )
+                    hit_pairs = df_exploded.filter(small_hit_expr).select(["cycle_id", "id"]).unique()
+                    if not hit_pairs.is_empty():
+                        df_small_matched = df_large_miss.join(hit_pairs, on=["cycle_id", "id"], how="semi")
+            
+            # ---- 合并大箱命中 + 小箱命中 ----
+            _parts = [df for df in [df_large_matched, df_small_matched] if not df.is_empty()]
+            df_l2_checked = pl.concat(_parts, how="diagonal") if _parts else pl.DataFrame()
 
             # 选出最佳匹配 (每个 nGen 记录只能匹配一个 Cactus，取时间最近的)
+            if df_l2_checked.is_empty():
+                logger.info("Level 2: 箱号校验后无命中，跳过宽松匹配")
+                return {'matched': df_l1_success, 'orphaned_ngen': df_l1_failed}
+            
             df_l2_best = df_l2_checked.sort(["cycle_id", "time_diff"]).unique(subset=["cycle_id"], keep="first")
             
             # 添加状态标记 4 (Loose Match)

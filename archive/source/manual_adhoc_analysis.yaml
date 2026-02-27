@@ -40,7 +40,7 @@ extractions:
       SELECT * FROM subtarget_vehicle_cycle
       ORDER BY shift_date DESC
       LIMIT 100
-    output_key: "raw_vehicle_cycle"
+    output_key: "raw_cycle_subtarget"
     alt_key: null
 
 default_args:

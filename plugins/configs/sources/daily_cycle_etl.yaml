@@ -38,26 +38,67 @@ extractions:
       SELECT 
         cycle_id,
         vehicle_id,
+        box,
+        shift_date,
         cycle_start_time as start_time,
         cycle_end_time as end_time,
         TIMESTAMPDIFF(SECOND, cycle_start_time, cycle_end_time) AS duration,
-        task_type
+        task_type,
+        running_time,
+        mileage,
+        power_consumption
       FROM cycle_section_summary
       WHERE DATE(shift_date) = CURDATE()
     output_key: "raw_cycle_section"
     alt_key: null
 
-  - id: "raw_vehicle_cycle"
+  - id: "raw_cycle_subtarget"
     source_type: "mysql"
     conn_id: "datalog_mysql_conn"
     query: |
       SELECT
         TRACTOR_CYCLE_ID AS cycle_id,
         TWIN_LIFT_INDICATOR AS is_twin_lift,
-        BOX AS box_count
+        BOX AS box,
+        SUBTASK_TYPE_1 AS subtask_type_1,
+        SUBTASK_TYPE_2 AS subtask_type_2,
+        SUBTASK_TYPE_3 AS subtask_type_3,
+        SUBTASK_TYPE_4 AS subtask_type_4,
+        SUBTASK_TYPE_5 AS subtask_type_5,
+        SUBTASK_TYPE_6 AS subtask_type_6,
+        SUBTASK_TYPE_7 AS subtask_type_7,
+        SUBTASK_TYPE_8 AS subtask_type_8,
+        PAGE_TIME_1_SUBTASK AS page_time_1_subtask,
+        PAGE_TIME_2_SUBTASK AS page_time_2_subtask,
+        PAGE_TIME_3_SUBTASK AS page_time_3_subtask,
+        PAGE_TIME_4_SUBTASK AS page_time_4_subtask,
+        PAGE_TIME_5_SUBTASK AS page_time_5_subtask,
+        PAGE_TIME_6_SUBTASK AS page_time_6_subtask,
+        PAGE_TIME_7_SUBTASK AS page_time_7_subtask,
+        PAGE_TIME_8_SUBTASK AS page_time_8_subtask
       FROM subtarget_vehicle_cycle
       WHERE DATE(shift_date) = CURDATE()
-    output_key: "raw_vehicle_cycle"
+    output_key: "raw_cycle_subtarget"
+    alt_key: null
+
+  - id: "raw_cycle_summary"
+    source_type: "mysql"
+    conn_id: "datalog_mysql_conn"
+    query: |
+      SELECT
+        cycle_id,
+        box,
+        total_size,
+        mileage,
+        mileage_all,
+        total_speed,
+        total_travel_speed,
+        (power_consumption/box) as power_per_box,
+        (power_consumption/mileage) as power_per_km,
+        idle as idle_time
+      FROM daily_cycle_overall
+      WHERE DATE(shift_date) = CURDATE()
+    output_key: "raw_cycle_summary"
     alt_key: null
 
 # 可选：覆盖全局 default_args

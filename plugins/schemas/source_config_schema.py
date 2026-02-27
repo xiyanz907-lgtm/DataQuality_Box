@@ -164,11 +164,11 @@ extractions:
       WHERE DATE(end_time) = '{{ ds }}'
     output_key: "raw_cycle_section"
 
-  - id: "raw_vehicle_cycle"
+  - id: "raw_cycle_subtarget"
     source_type: "mysql"
     conn_id: "datalog_mysql_conn"
     table: "subtarget_vehicle_cycle"
-    output_key: "raw_vehicle_cycle"
+    output_key: "raw_cycle_subtarget"
 
 default_args:
   retries: 3
