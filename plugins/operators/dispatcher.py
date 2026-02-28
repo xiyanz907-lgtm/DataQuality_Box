@@ -82,20 +82,21 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
     
     def _send_p0_alerts(self, alerts: List[AlertItem], ctx: GovernanceContext) -> None:
         """
-        发送 P0 告警（每个规则单独发送）
+        发送 P0 告警（批量汇总为一封邮件）
         
         Args:
             alerts: P0 告警列表
             ctx: 治理上下文
         """
-        self.log.info(f"📧 Sending {len(alerts)} P0 alerts (immediate)...")
+        self.log.info(f"📧 Sending P0 batch alert ({len(alerts)} rules)...")
         
-        for alert in alerts:
-            try:
-                self._send_single_alert(alert, ctx, urgent=True)
-                self.log.info(f"  ✅ Sent P0 alert: {alert.rule_id}")
-            except Exception as e:
-                self.log.error(f"  ❌ Failed to send P0 alert {alert.rule_id}: {e}")
+        try:
+            subject = self._build_subject("P0", ctx, len(alerts))
+            body = self._build_p0_batch_body(alerts, ctx)
+            self._send_email(subject, body)
+            self.log.info(f"  ✅ Sent P0 batch alert: {len(alerts)} rules")
+        except Exception as e:
+            self.log.error(f"  ❌ Failed to send P0 batch alert: {e}")
     
     def _send_p2_batch_alert(self, alerts: List[AlertItem], ctx: GovernanceContext) -> None:
         """
@@ -250,6 +251,85 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
                 </div>
                 
                 <p><em>生成时间: {alert.created_at}</em></p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return body
+    
+    def _build_p0_batch_body(
+        self, 
+        alerts: List[AlertItem], 
+        ctx: GovernanceContext
+    ) -> str:
+        """
+        构建 P0 批量告警的邮件正文
+        
+        Args:
+            alerts: P0 告警列表
+            ctx: 治理上下文
+        
+        Returns:
+            HTML 格式的邮件正文
+        """
+        total_hits = sum(len(alert.trigger_cycle_ids) for alert in alerts)
+        
+        # 构建规则汇总表格
+        rule_rows = ""
+        for alert in alerts:
+            ids_preview = alert.trigger_cycle_ids[:5]
+            ids_text = ", ".join(str(cid) for cid in ids_preview)
+            if len(alert.trigger_cycle_ids) > 5:
+                ids_text += f" ... (+{len(alert.trigger_cycle_ids) - 5})"
+            
+            rule_rows += f"""
+            <tr>
+                <td>{alert.rule_id}</td>
+                <td>{alert.title}</td>
+                <td style="text-align:center;"><strong>{len(alert.trigger_cycle_ids)}</strong></td>
+                <td class="cycle-ids">{ids_text}</td>
+            </tr>
+            """
+        
+        body = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; }}
+                .header {{ background-color: #d32f2f; color: white; padding: 15px; }}
+                .summary {{ background-color: #ffebee; padding: 15px; margin: 15px 0; border-left: 4px solid #d32f2f; }}
+                .content {{ padding: 20px; }}
+                table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+                th {{ background-color: #ffcdd2; }}
+                .cycle-ids {{ color: #666; font-size: 0.85em; max-width: 300px; word-break: break-all; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h2>🔴 P0 数据质量告警汇总</h2>
+            </div>
+            <div class="content">
+                <div class="summary">
+                    <p><strong>批次:</strong> {ctx.batch_id}</p>
+                    <p><strong>日期:</strong> {ctx.run_date}</p>
+                    <p><strong>命中规则数:</strong> {len(alerts)}</p>
+                    <p><strong>异常数据总数:</strong> {total_hits} 行</p>
+                </div>
+                
+                <h3>📋 规则命中明细</h3>
+                <table>
+                    <tr>
+                        <th>规则 ID</th>
+                        <th>说明</th>
+                        <th>命中数</th>
+                        <th>Cycle IDs (前5条)</th>
+                    </tr>
+                    {rule_rows}
+                </table>
+                
+                <p><em>生成时间: {datetime.utcnow().isoformat()}</em></p>
             </div>
         </body>
         </html>

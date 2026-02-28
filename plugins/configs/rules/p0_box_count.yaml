@@ -12,10 +12,10 @@ target_entity: Cycle
 # 输入数据（从 Context 读取）
 input:
   key: entity_cycle  # 引用 Adapter 写入的实体数据 
-  # 过滤条件：diff_box_count1 == 0 and diff_box_count2 == 0
+  # 过滤条件：diff_box_count1 或 diff_box_count2 不为0
 
 logic:
-  filter_expr: "pl.col('diff_box_count1') == 0 and pl.col('diff_box_count2') == 0"
+  filter_expr: "pl.col('diff_box_count1') != 0 or pl.col('diff_box_count2') != 0"
 
 # 输出配置
 output:

@@ -16,3 +16,17 @@ input:
 
 logic:
   filter_expr: "pl.col('box') > 0 and pl.col('non_null_subtask_count') > 1 and pl.col('non_null_page_time_count') > 1"
+
+# 输出配置
+output:
+  key: rule_p0_subtask_count_hits  # 写入 Context 的 key
+  stage: RESULT                  # 数据阶段
+
+# 告警配置
+alert:
+  enabled: true
+  template: "子任务数量异常: {trigger_cycle_ids}"
+  title: "P0 告警：子任务数量校验"
+
+# 依赖关系（此规则不依赖其他规则）
+depends_on: []
