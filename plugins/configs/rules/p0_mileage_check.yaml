@@ -25,7 +25,7 @@ output:
 alert:
   enabled: true
   template: "mileage字段异常: {trigger_cycle_ids}"
-  title: "P0 告警：mileage字段校验"
+  title: "[Checkpoint log]mileage为0，箱数大于0"
 
 # 依赖关系（此规则不依赖其他规则）
 depends_on: []

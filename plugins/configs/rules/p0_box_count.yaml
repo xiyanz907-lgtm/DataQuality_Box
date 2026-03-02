@@ -26,7 +26,7 @@ output:
 alert:
   enabled: true
   template: "箱数差异异常: {trigger_cycle_ids}"
-  title: "P0 告警：箱数差异校验"
+  title: "[Cycle log/Daily report/Checkpoint log]箱数有差异"
 
 # 依赖关系（此规则不依赖其他规则）
 depends_on: []

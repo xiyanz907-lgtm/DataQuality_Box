@@ -25,7 +25,7 @@ output:
 alert:
   enabled: true
   template: "Checkpoint log部分阶段任务不可为空: {trigger_cycle_ids}"
-  title: "P0 告警：Checkpoint log部分阶段任务不可为空"
+  title: "[Checkpoint log]有阶段任务为空：3-4"
 
 # 依赖关系（此规则不依赖其他规则）
 depends_on: []

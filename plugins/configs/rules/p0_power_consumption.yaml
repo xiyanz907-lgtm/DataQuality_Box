@@ -34,7 +34,7 @@ output:
 alert:
   enabled: true
   template: "功率消耗异常: {trigger_cycle_ids}"
-  title: "P0 告警：功率消耗校验"
+  title: "[Checkpoint log]功率消耗校验"
 
 # 依赖关系（此规则不依赖其他规则）
 depends_on: []
