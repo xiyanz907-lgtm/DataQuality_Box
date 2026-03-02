@@ -50,7 +50,7 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
         流程：
         1. 检查是否有告警
         2. 按严重等级分组
-        3. P0 告警即时发送
+        3. P0 告警批量汇总发送
         4. P2 告警批量汇总发送
         """
         if not ctx.alerts:
