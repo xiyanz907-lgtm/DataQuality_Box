@@ -266,8 +266,15 @@ class DAGFactory:
         rule_group >> aggregator
         
         # ========== Step 6: Notification Dispatcher ==========
+        dispatcher_config = {}
+        if config.notification:
+            dispatcher_config['email_to'] = ','.join(config.notification.email_to)
+            if config.notification.email_cc:
+                dispatcher_config['email_cc'] = ','.join(config.notification.email_cc)
+        
         dispatcher = NotificationDispatcherOperator(
             task_id="notification_dispatcher",
+            config_dict=dispatcher_config if dispatcher_config else None,
             upstream_task_id="context_aggregator",
             dag=dag
         )

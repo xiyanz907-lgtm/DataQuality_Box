@@ -14,7 +14,7 @@ source_meta:
 # 调度策略
 scheduling:
   trigger_mode: "CRON"
-  cron_expression: "0 14 * * *"  # 每天上午十点（当地时间）检查前一天的数据
+  cron_expression: "0 8 * * *"  # 每天上午八点（UTC时间）检查前一天的数据
   
   # 可选：前置传感器，确保上游数据就绪
   sensor:
@@ -46,7 +46,8 @@ extractions:
         task_type,
         running_time,
         mileage,
-        power_consumption
+        power_consumption,
+        ckp_3to4_total_time
       FROM cycle_section_summary
       WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
     output_key: "raw_cycle_section"
@@ -106,6 +107,11 @@ default_args:
   retries: 3
   retry_delay_minutes: 10
   email: ["xiyan.zhou@westwell-lab.com"]
+
+# 通知配置（告警邮件的收件人）
+notification:
+  email_to: ["xiyan.zhou@westwell-lab.com","zzzcrocodile@163.com"]
+  # email_cc: ["manager@westwell-lab.com"]
 
 # 资产打包配置（可选，默认启用）
 asset_packing:

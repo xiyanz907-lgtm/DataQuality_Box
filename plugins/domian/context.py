@@ -60,6 +60,7 @@ class RuleOutputRef:
     execution_time_sec: float = 0.0 # 执行耗时（秒）
     error_message: str = ""         # 失败原因（如果失败）
     timestamp: str = ""             # 执行时间戳
+    alert_title: str = ""           # 告警标题（来自 rule YAML 的 alert.title）
 
 @dataclass
 class AlertItem:
@@ -235,7 +236,7 @@ class GovernanceContext:
     
     def register_rule_output(self, rule_id: str, status: str, output_uri: str = "",
                             hit_count: int = 0, execution_time: float = 0.0,
-                            error_message: str = "") -> None:
+                            error_message: str = "", alert_title: str = "") -> None:
         """
         注册规则执行结果
         
@@ -246,6 +247,7 @@ class GovernanceContext:
             hit_count: 命中行数
             execution_time: 执行耗时（秒）
             error_message: 失败原因
+            alert_title: 告警标题（来自 rule YAML 的 alert.title）
         """
         ref = RuleOutputRef(
             rule_id=rule_id,
@@ -254,7 +256,8 @@ class GovernanceContext:
             hit_count=hit_count,
             execution_time_sec=execution_time,
             error_message=error_message,
-            timestamp=datetime.utcnow().isoformat()
+            timestamp=datetime.utcnow().isoformat(),
+            alert_title=alert_title
         )
         self.rule_outputs[rule_id] = ref
         

@@ -34,7 +34,7 @@ output:
 alert:
   enabled: true
   template: "时间倒挂: {trigger_cycle_ids}"
-  title: "P0 告警：时间倒挂检测"
+  title: "[Checkpoint log]任务起止时间倒挂"
 
 # 依赖关系（此规则不依赖其他规则）
 depends_on: []

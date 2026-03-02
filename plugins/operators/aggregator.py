@@ -158,11 +158,14 @@ class ContextAggregatorOperator(BaseGovernanceOperator):
                         # 提取 cycle_id 列表
                         cycle_ids = p0_df['cycle_id'].to_list()
                         
+                        # 使用 rule YAML 中定义的 alert.title，无则回退到默认
+                        title = rule_output.alert_title or f"[P0] 数据质量异常 - {rule_id}"
+                        
                         # 生成告警
                         ctx.add_alert(
                             rule_id=rule_id,
                             severity="P0",
-                            title=f"[P0] 数据质量异常 - {rule_id}",
+                            title=title,
                             content=f"发现 {len(cycle_ids)} 条异常数据",
                             trigger_cycle_ids=cycle_ids
                         )
@@ -269,10 +272,13 @@ class ContextAggregatorOperator(BaseGovernanceOperator):
                         if final_df.height > 0:
                             cycle_ids = final_df['cycle_id'].to_list()
                             
+                            # 使用 rule YAML 中定义的 alert.title，无则回退到默认
+                            title = rule_output.alert_title or f"[P2] SLA 违规 - {rule_id}"
+                            
                             ctx.add_alert(
                                 rule_id=rule_id,
                                 severity="P2",
-                                title=f"[P2] SLA 违规 - {rule_id}",
+                                title=title,
                                 content=f"发现 {len(cycle_ids)} 条超时数据（已排除白名单 {len(exempted_ids)} 条）",
                                 trigger_cycle_ids=cycle_ids
                             )

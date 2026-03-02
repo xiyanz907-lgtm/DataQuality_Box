@@ -112,6 +112,12 @@ class DefaultArgsConfig(BaseModel):
     retry_delay_minutes: Optional[int] = None
 
 
+class NotificationConfig(BaseModel):
+    """通知配置（可选，覆盖全局默认收件人）"""
+    email_to: List[str] = Field(..., min_items=1, description="收件人列表")
+    email_cc: Optional[List[str]] = Field(None, description="抄送人列表")
+
+
 class AssetPackingConfig(BaseModel):
     """资产打包配置"""
     enabled: bool = True  # 是否启用资产保存
@@ -125,6 +131,10 @@ class SourceYAMLConfig(BaseModel):
     scheduling: SchedulingConfig
     extractions: List[ExtractionConfig] = Field(..., min_items=1)
     default_args: Optional[DefaultArgsConfig] = None
+    notification: Optional[NotificationConfig] = Field(
+        None,
+        description="通知配置（可选，不配置则使用环境变量 ALERT_EMAIL_TO）"
+    )
     asset_packing: Optional[AssetPackingConfig] = Field(
         default_factory=lambda: AssetPackingConfig(),
         description="资产打包配置（可选，默认启用）"

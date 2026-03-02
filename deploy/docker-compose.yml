@@ -50,6 +50,7 @@ services:
             # 【注入普通变量】
       - SITE_TIMEZONE=${SITE_TIMEZONE}
       - ALERT_EMAIL_TO=${ALERT_EMAIL_TO}
+      - RECON_EMAIL_TO=${RECON_EMAIL_TO}
       - THRESHOLD_TIME_DIFF=${THRESHOLD_TIME_DIFF}
       - BATCH_SIZE=${BATCH_SIZE}
 

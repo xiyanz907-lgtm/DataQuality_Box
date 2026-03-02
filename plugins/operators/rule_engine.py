@@ -71,6 +71,7 @@ class GenericRuleOperator(BaseGovernanceOperator):
         
         rule_id = self._config['meta']['rule_id']
         severity = self._config['meta']['severity']
+        alert_title = self._config.get('alert', {}).get('title', '')
         
         self.log.info(f"🔍 Executing rule: {rule_id} ({severity})")
         
@@ -117,7 +118,8 @@ class GenericRuleOperator(BaseGovernanceOperator):
                     status="SUCCESS",
                     output_uri=ctx.get_data_uri(result_key),
                     hit_count=hit_df.height,
-                    execution_time=execution_time
+                    execution_time=execution_time,
+                    alert_title=alert_title
                 )
                 
                 self.log.info(f"✅ Rule [{rule_id}] completed: {hit_df.height} hits in {execution_time:.2f}s")
@@ -128,7 +130,8 @@ class GenericRuleOperator(BaseGovernanceOperator):
                     rule_id=rule_id,
                     status="SUCCESS",
                     hit_count=0,
-                    execution_time=execution_time
+                    execution_time=execution_time,
+                    alert_title=alert_title
                 )
                 
                 self.log.info(f"✅ Rule [{rule_id}] passed: 0 hits in {execution_time:.2f}s")
@@ -151,7 +154,8 @@ class GenericRuleOperator(BaseGovernanceOperator):
                     status="FAILED",
                     error_message=str(e),
                     hit_count=0,
-                    execution_time=execution_time
+                    execution_time=execution_time,
+                    alert_title=alert_title
                 )
                 
                 # Task 仍标记为 Success（不阻断流程）

@@ -22,3 +22,12 @@ logic:
 output:
   key: rule_p0_running_time_hits  # 写入 Context 的 key
   stage: RESULT                  # 数据阶段
+
+# 告警配置
+alert:
+  enabled: true
+  template: "运行时间异常: {trigger_cycle_ids}"
+  title: "[Checkpoint log]单圈作业时长超过2小时" 
+
+# 依赖关系（此规则不依赖其他规则）
+depends_on: []

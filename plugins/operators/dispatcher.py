@@ -28,7 +28,7 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
     
     # 可选：邮件模板配置
     templates:
-      p0_subject: "[紧急] {batch_id} - 数据质量告警"
+      p0_subject: "{batch_id} - SLA 违规汇总"
       p2_subject: "{batch_id} - SLA 违规汇总"
     ```
     
@@ -221,36 +221,42 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
         <html>
         <head>
             <style>
-                body {{ font-family: Arial, sans-serif; }}
-                .header {{ background-color: #f44336; color: white; padding: 15px; }}
-                .content {{ padding: 20px; }}
-                .info {{ background-color: #f5f5f5; padding: 10px; margin: 10px 0; }}
-                .cycle-ids {{ color: #666; font-size: 0.9em; }}
+                body {{ font-family: -apple-system, 'Segoe UI', Arial, sans-serif; color: #333; margin: 0; padding: 0; background-color: #f9f9f9; }}
+                .wrapper {{ max-width: 640px; margin: 20px auto; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; }}
+                .header {{ padding: 16px 24px; border-bottom: 1px solid #e0e0e0; }}
+                .header h2 {{ margin: 0; font-size: 17px; font-weight: 600; color: #1a1a1a; }}
+                .severity-tag {{ display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 3px; margin-right: 8px; background-color: #fdecea; color: #b71c1c; }}
+                .content {{ padding: 20px 24px; }}
+                .meta {{ font-size: 13px; color: #666; line-height: 1.8; }}
+                .detail-box {{ background-color: #fafafa; border: 1px solid #eee; border-radius: 4px; padding: 12px 16px; margin: 16px 0; font-size: 13px; }}
+                .cycle-ids {{ font-size: 12px; color: #888; line-height: 1.6; }}
+                .footer {{ padding: 12px 24px; border-top: 1px solid #f0f0f0; font-size: 11px; color: #aaa; }}
             </style>
         </head>
         <body>
-            <div class="header">
-                {urgent_mark}
-                <h2>{alert.title}</h2>
-            </div>
-            <div class="content">
-                <p><strong>批次:</strong> {ctx.batch_id}</p>
-                <p><strong>日期:</strong> {ctx.run_date}</p>
-                <p><strong>规则:</strong> {alert.rule_id}</p>
-                <p><strong>严重等级:</strong> {alert.severity}</p>
-                
-                <div class="info">
-                    <h3>告警详情</h3>
-                    <p>{alert.content}</p>
+            <div class="wrapper">
+                <div class="header">
+                    <h2><span class="severity-tag">{alert.severity}</span>{alert.title}</h2>
                 </div>
-                
-                <div class="cycle-ids">
-                    <h4>触发数据 (Cycle IDs):</h4>
-                    <p>{', '.join(trigger_ids_preview)}</p>
-                    {'<p><em>... 还有 {} 条</em></p>'.format(len(alert.trigger_cycle_ids) - 10) if has_more else ''}
+                <div class="content">
+                    <div class="meta">
+                        <p><strong>批次:</strong> {ctx.batch_id}</p>
+                        <p><strong>日期:</strong> {ctx.run_date}</p>
+                        <p><strong>规则:</strong> {alert.rule_id}</p>
+                    </div>
+                    
+                    <div class="detail-box">
+                        <strong>告警详情</strong>
+                        <p style="margin:6px 0 0 0;">{alert.content}</p>
+                    </div>
+                    
+                    <div class="cycle-ids">
+                        <strong>触发数据 (Cycle IDs):</strong><br>
+                        {', '.join(str(cid) for cid in trigger_ids_preview)}
+                        {'<br><em>… 还有 {} 条</em>'.format(len(alert.trigger_cycle_ids) - 10) if has_more else ''}
+                    </div>
                 </div>
-                
-                <p><em>生成时间: {alert.created_at}</em></p>
+                <div class="footer">生成时间: {alert.created_at}</div>
             </div>
         </body>
         </html>
@@ -287,7 +293,7 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
             <tr>
                 <td>{alert.rule_id}</td>
                 <td>{alert.title}</td>
-                <td style="text-align:center;"><strong>{len(alert.trigger_cycle_ids)}</strong></td>
+                <td class="num">{len(alert.trigger_cycle_ids)}</td>
                 <td class="cycle-ids">{ids_text}</td>
             </tr>
             """
@@ -296,40 +302,61 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
         <html>
         <head>
             <style>
-                body {{ font-family: Arial, sans-serif; }}
-                .header {{ background-color: #d32f2f; color: white; padding: 15px; }}
-                .summary {{ background-color: #ffebee; padding: 15px; margin: 15px 0; border-left: 4px solid #d32f2f; }}
-                .content {{ padding: 20px; }}
-                table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-                th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
-                th {{ background-color: #ffcdd2; }}
-                .cycle-ids {{ color: #666; font-size: 0.85em; max-width: 300px; word-break: break-all; }}
+                body {{ font-family: -apple-system, 'Segoe UI', Arial, sans-serif; color: #333; margin: 0; padding: 0; background-color: #f9f9f9; }}
+                .wrapper {{ max-width: 720px; margin: 20px auto; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; }}
+                .header {{ padding: 16px 24px; border-bottom: 1px solid #e0e0e0; }}
+                .header h2 {{ margin: 0; font-size: 17px; font-weight: 600; color: #1a1a1a; }}
+                .severity-tag {{ display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 3px; margin-right: 8px; background-color: #fdecea; color: #b71c1c; }}
+                .content {{ padding: 20px 24px; }}
+                .summary {{ display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; color: #555; margin-bottom: 20px; padding: 12px 16px; background-color: #fafafa; border: 1px solid #eee; border-radius: 4px; }}
+                .summary-item {{ }}
+                .summary-item .label {{ color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }}
+                .summary-item .value {{ font-size: 18px; font-weight: 600; color: #1a1a1a; }}
+                table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+                th {{ text-align: left; padding: 8px 12px; background-color: #f5f5f5; border-bottom: 2px solid #e0e0e0; font-weight: 600; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }}
+                td {{ padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }}
+                tr:last-child td {{ border-bottom: none; }}
+                .num {{ text-align: center; font-weight: 600; }}
+                .cycle-ids {{ color: #999; font-size: 11px; max-width: 280px; word-break: break-all; }}
+                .footer {{ padding: 12px 24px; border-top: 1px solid #f0f0f0; font-size: 11px; color: #aaa; }}
             </style>
         </head>
         <body>
-            <div class="header">
-                <h2>🔴 P0 数据质量告警汇总</h2>
-            </div>
-            <div class="content">
-                <div class="summary">
-                    <p><strong>批次:</strong> {ctx.batch_id}</p>
-                    <p><strong>日期:</strong> {ctx.run_date}</p>
-                    <p><strong>命中规则数:</strong> {len(alerts)}</p>
-                    <p><strong>异常数据总数:</strong> {total_hits} 行</p>
+            <div class="wrapper">
+                <div class="header">
+                    <h2><span class="severity-tag">P0</span>数据质量告警汇总</h2>
                 </div>
-                
-                <h3>📋 规则命中明细</h3>
-                <table>
-                    <tr>
-                        <th>规则 ID</th>
-                        <th>说明</th>
-                        <th>命中数</th>
-                        <th>Cycle IDs (前5条)</th>
-                    </tr>
-                    {rule_rows}
-                </table>
-                
-                <p><em>生成时间: {datetime.utcnow().isoformat()}</em></p>
+                <div class="content">
+                    <div class="summary">
+                        <div class="summary-item">
+                            <div class="label">批次</div>
+                            <div class="value" style="font-size:13px;">{ctx.batch_id}</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="label">日期</div>
+                            <div class="value" style="font-size:13px;">{ctx.run_date}</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="label">命中规则</div>
+                            <div class="value">{len(alerts)}</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="label">异常数据</div>
+                            <div class="value">{total_hits}</div>
+                        </div>
+                    </div>
+                    
+                    <table>
+                        <tr>
+                            <th>规则 ID</th>
+                            <th>说明</th>
+                            <th style="text-align:center;">命中数</th>
+                            <th>Cycle IDs</th>
+                        </tr>
+                        {rule_rows}
+                    </table>
+                </div>
+                <div class="footer">生成时间: {datetime.utcnow().isoformat()}</div>
             </div>
         </body>
         </html>
@@ -361,7 +388,7 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
             alert_items += f"""
             <tr>
                 <td>{alert.rule_id}</td>
-                <td>{len(alert.trigger_cycle_ids)}</td>
+                <td class="num">{len(alert.trigger_cycle_ids)}</td>
                 <td>{alert.title}</td>
             </tr>
             """
@@ -370,35 +397,44 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
         <html>
         <head>
             <style>
-                body {{ font-family: Arial, sans-serif; }}
-                .header {{ background-color: #ff9800; color: white; padding: 15px; }}
-                .content {{ padding: 20px; }}
-                table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-                th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
-                th {{ background-color: #f5f5f5; }}
+                body {{ font-family: -apple-system, 'Segoe UI', Arial, sans-serif; color: #333; margin: 0; padding: 0; background-color: #f9f9f9; }}
+                .wrapper {{ max-width: 640px; margin: 20px auto; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; }}
+                .header {{ padding: 16px 24px; border-bottom: 1px solid #e0e0e0; }}
+                .header h2 {{ margin: 0; font-size: 17px; font-weight: 600; color: #1a1a1a; }}
+                .severity-tag {{ display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 3px; margin-right: 8px; background-color: #fff3e0; color: #e65100; }}
+                .content {{ padding: 20px 24px; }}
+                .meta {{ font-size: 13px; color: #666; line-height: 1.8; margin-bottom: 16px; }}
+                table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+                th {{ text-align: left; padding: 8px 12px; background-color: #f5f5f5; border-bottom: 2px solid #e0e0e0; font-weight: 600; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }}
+                td {{ padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }}
+                tr:last-child td {{ border-bottom: none; }}
+                .num {{ text-align: center; font-weight: 600; }}
+                .footer {{ padding: 12px 24px; border-top: 1px solid #f0f0f0; font-size: 11px; color: #aaa; }}
             </style>
         </head>
         <body>
-            <div class="header">
-                <h2>⚠️ P2 SLA 违规汇总</h2>
-            </div>
-            <div class="content">
-                <p><strong>批次:</strong> {ctx.batch_id}</p>
-                <p><strong>日期:</strong> {ctx.run_date}</p>
-                <p><strong>违规规则数:</strong> {len(alerts)}</p>
-                <p><strong>违规数据总数:</strong> {total_violations}</p>
-                
-                <h3>详细列表</h3>
-                <table>
-                    <tr>
-                        <th>规则 ID</th>
-                        <th>违规数量</th>
-                        <th>描述</th>
-                    </tr>
-                    {alert_items}
-                </table>
-                
-                <p><em>生成时间: {datetime.utcnow().isoformat()}</em></p>
+            <div class="wrapper">
+                <div class="header">
+                    <h2><span class="severity-tag">P2</span>SLA 违规汇总</h2>
+                </div>
+                <div class="content">
+                    <div class="meta">
+                        <strong>批次:</strong> {ctx.batch_id} &nbsp;&middot;&nbsp;
+                        <strong>日期:</strong> {ctx.run_date} &nbsp;&middot;&nbsp;
+                        <strong>违规规则:</strong> {len(alerts)} &nbsp;&middot;&nbsp;
+                        <strong>违规数据:</strong> {total_violations}
+                    </div>
+                    
+                    <table>
+                        <tr>
+                            <th>规则 ID</th>
+                            <th style="text-align:center;">违规数量</th>
+                            <th>描述</th>
+                        </tr>
+                        {alert_items}
+                    </table>
+                </div>
+                <div class="footer">生成时间: {datetime.utcnow().isoformat()}</div>
             </div>
         </body>
         </html>

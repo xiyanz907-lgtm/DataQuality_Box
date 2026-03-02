@@ -64,6 +64,9 @@ fields:
   - target: "power_consumption"
     source_expr: "col('power_consumption')"
 
+  - target: "ckp_3to4_total_time"
+    source_expr: "col('ckp_3to4_total_time')"
+
   # 2. 从 subtarget_vehicle_cycle 表获取字段
   # 注：如果字段名不重复，Polars 不会添加后缀
 

@@ -26,7 +26,7 @@ output:
 alert:
   enabled: true
   template: "子任务数量异常: {trigger_cycle_ids}"
-  title: "P0 告警：子任务数量校验"
+  title: "[Cycle log]箱数大于0，子任务相关字段为空"
 
 # 依赖关系（此规则不依赖其他规则）
 depends_on: []

@@ -215,25 +215,27 @@ with DAG(
         summary_text = "\n".join(summary_lines)
         logging.info(summary_text)
         
-        # 简单的邮件通知逻辑
-        to_email = os.getenv("ALERT_EMAIL_TO")
+        # 邮件通知（使用独立的 RECON_EMAIL_TO，与 dag_factory 治理邮件分开）
+        to_email = os.getenv("RECON_EMAIL_TO", os.getenv("ALERT_EMAIL_TO"))
         if to_email:
             try:
+                recipients = [e.strip() for e in to_email.split(',')]
+                
                 # 构造 HTML 内容 (简单的换行和加粗)
                 html_content = summary_text.replace('\n', '<br>')
                 html_content = html_content.replace('Top Errors', '<b>Top Errors</b>')
                 html_content = html_content.replace('Data Quality Metrics', '<b>Data Quality Metrics</b>')
                 
                 send_email(
-                    to=[to_email],
+                    to=recipients,
                     subject=f"Reconciliation Worker Report - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
                     html_content=html_content
                 )
-                logging.info(f"Email sent to {to_email}")
+                logging.info(f"Email sent to {recipients}")
             except Exception as e:
                 logging.warning(f"Could not send email: {e}")
         else:
-            logging.warning("ALERT_EMAIL_TO not set, skipping email.")
+            logging.warning("RECON_EMAIL_TO / ALERT_EMAIL_TO not set, skipping email.")
             
         return summary_text
 
