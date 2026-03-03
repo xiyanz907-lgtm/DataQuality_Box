@@ -110,7 +110,7 @@ default_args:
 
 # 通知配置（告警邮件的收件人）
 notification:
-  email_to: ["xiyan.zhou@westwell-lab.com","xiaofu.pan@westwell-lab.com","feiyang.ling@westwell-lab.com","zhishang.feng@westwell-lab.com"]
+  email_to: ["xiyan.zhou@westwell-lab.com"]
   # email_cc: ["manager@westwell-lab.com"]
 
 # 资产打包配置（可选，默认启用）

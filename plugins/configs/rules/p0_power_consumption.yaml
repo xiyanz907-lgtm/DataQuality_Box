@@ -1,13 +1,12 @@
-# p1_twin_lift.yaml
-# 规则配置文件：P1 - 双箱作业挖掘
+# p0_power_consumption.yaml
+# 规则配置文件：P0 - 功率消耗校验
 #
-# 功能：识别 is_twin_lift == 1 的高价值特征数据
-# 治理等级：P1 (Asset)
-# 处理方式：打标、豁免、打包
-
+# 功能：识别电耗异常的数据
+# 治理等级：P0 (Immediate)
+# 处理方式：告警
 # 规则元信息
 meta:
-  rule_id: rule_p1_power_consumption
+  rule_id: rule_p0_power_consumption
   severity: P0
   description: "功率消耗校验：识别电耗异常的数据"
   owner: data-governance@example.com
