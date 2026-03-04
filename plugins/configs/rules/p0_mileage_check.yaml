@@ -14,7 +14,7 @@ input:
   key: entity_cycle  # 引用 Adapter 写入的实体数据
 
 logic:
-  filter_expr: "pl.col('mileage') == 0 and pl.col('box') > 0"
+  filter_expr: "(pl.col('mileage') == 0) & (pl.col('box') > 0)"
 
 # 输出配置
 output:

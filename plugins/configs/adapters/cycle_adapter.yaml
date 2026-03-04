@@ -28,6 +28,12 @@ input_schema:
       left_on: "cycle_id"
       right_on: "cycle_id"
       suffix: "_summary"
+
+    - join_source: "raw_ngen_box_count"  # 要 Join 的数据源
+      type: "left"
+      left_on: "cycle_id"
+      right_on: "cycle_id"
+      suffix: "_ngen"
 # 字段映射（列表格式，每个字段一个配置）
 fields:
   # 1. 从主表 cycle_section_summary 表获取字段
@@ -66,6 +72,9 @@ fields:
 
   - target: "ckp_3to4_total_time"
     source_expr: "col('ckp_3to4_total_time')"
+
+  - target: "ckp_7to8_total_time"
+    source_expr: "col('ckp_7to8_total_time')"
 
   # 2. 从 subtarget_vehicle_cycle 表获取字段
   # 注：如果字段名不重复，Polars 不会添加后缀
@@ -171,6 +180,9 @@ fields:
     source_expr: "col('idle_time')"
   
   # 4. 差值字段
+  - target: "diff_box_count_ngen"
+    source_expr: "col('box') - col('box_ngen')"
+  
   - target: "diff_box_count1"
     source_expr: "col('box') - col('box_subtarget')"
   

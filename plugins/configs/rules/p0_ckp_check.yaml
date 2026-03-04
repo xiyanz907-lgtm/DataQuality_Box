@@ -14,7 +14,7 @@ input:
   key: entity_cycle  # 引用 Adapter 写入的实体数据
 
 logic:
-  filter_expr: "pl.col('ckp_3to4_total_time').is_null()"
+  filter_expr: "pl.col('ckp_3to4_total_time').is_null() | pl.col('ckp_7to8_total_time').is_null()"
 
 # 输出配置
 output:
@@ -25,7 +25,7 @@ output:
 alert:
   enabled: true
   template: "Checkpoint log部分阶段任务不可为空: {trigger_cycle_ids}"
-  title: "[Checkpoint log]有阶段任务为空：3-4"
+  title: "[Checkpoint log]有阶段任务为空：3-4/7-8"
 
 # 依赖关系（此规则不依赖其他规则）
 depends_on: []

@@ -15,7 +15,7 @@ input:
   # 过滤条件：subtask_count > 1
 
 logic:
-  filter_expr: "pl.col('box') > 0 and pl.col('non_null_subtask_count') > 1 and pl.col('non_null_page_time_count') > 1"
+  filter_expr: "(pl.col('box') > 0) & (pl.col('non_null_subtask_count') > 1) & (pl.col('non_null_page_time_count') > 1)"
 
 # 输出配置
 output:

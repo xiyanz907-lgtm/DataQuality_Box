@@ -2,7 +2,7 @@
 meta:
   rule_id: rule_p0_box_count
   severity: P0
-  description: "箱数差异校验：识别三张表间箱数差异的数据"
+  description: "箱数差异校验：识别Cycle log/Daily report/Checkpoint log/ngen箱数差异的数据"
   owner: data-governance@example.com
   created_at: "2026-02-06"
 
@@ -15,7 +15,7 @@ input:
   # 过滤条件：diff_box_count1 或 diff_box_count2 不为0
 
 logic:
-  filter_expr: "pl.col('diff_box_count1') != 0 or pl.col('diff_box_count2') != 0"
+  filter_expr: "(pl.col('diff_box_count1') != 0) | (pl.col('diff_box_count2') != 0) | (pl.col('diff_box_count_ngen') != 0)"
 
 # 输出配置
 output:
@@ -26,7 +26,7 @@ output:
 alert:
   enabled: true
   template: "箱数差异异常: {trigger_cycle_ids}"
-  title: "[Cycle log/Daily report/Checkpoint log]箱数有差异"
+  title: "[Cycle log/Daily report/Checkpoint log/ngen]箱数有差异"
 
 # 依赖关系（此规则不依赖其他规则）
 depends_on: []

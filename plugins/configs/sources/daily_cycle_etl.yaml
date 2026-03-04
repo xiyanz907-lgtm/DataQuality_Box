@@ -47,7 +47,8 @@ extractions:
         running_time,
         mileage,
         power_consumption,
-        ckp_3to4_total_time
+        ckp_3to4_total_time,
+        ckp_7to8_total_time
       FROM cycle_section_summary
       WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
     output_key: "raw_cycle_section"
@@ -100,6 +101,19 @@ extractions:
       FROM daily_cycle_overall
       WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
     output_key: "raw_cycle_summary"
+    alt_key: null
+
+  - id: "raw_ngen_box_count"
+    source_type: "mysql"
+    conn_id: "ngen_mysql_conn"
+    query: |
+      SELECT
+        TRACTOR_CYCLE_ID AS cycle_id,
+        COUNT(*) AS box
+      FROM ngen
+      WHERE last_modified_timestamp >= DATE_SUB(CURDATE(), INTERVAL 2 DAY) AND TRACTOR_NO LIKE 'AT%'
+      GROUP BY TRACTOR_CYCLE_ID
+    output_key: "raw_ngen_box_count"
     alt_key: null
 
 # 可选：覆盖全局 default_args

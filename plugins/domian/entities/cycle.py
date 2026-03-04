@@ -32,6 +32,7 @@ class Cycle:
     mileage: float          # 单圈作业里程（km）
     power_consumption: float          # 单圈电耗
     ckp_3to4_total_time: float          # checkpoint 3to4段总时间
+    ckp_7to8_total_time: float          # checkpoint 7to8段总时间
     is_twin_lift: bool      # 是否双箱 (True/False)
     subtask_type_1: str          # 子任务1
     page_time_1_subtask: float          # 子任务1开始时间
@@ -73,6 +74,7 @@ class Cycle:
     daily_avg_power_per_box: float         # AVG(power_per_box) OVER (shift_date) — 同天平均每个box电耗
 
     # --- 差异字段 ---
+    diff_box_count_ngen: int          # Checkpoint log和ngen箱数差异
     diff_box_count1: int          # Checkpoint log和Cycle log箱数差异
     diff_box_count2: int          # Checkpoint log和Daily_report箱数差异
     diff_mileage: float          # Checkpoint log和Daily_report作业里程差异（km）
