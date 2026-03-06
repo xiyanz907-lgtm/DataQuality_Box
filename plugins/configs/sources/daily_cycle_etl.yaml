@@ -23,7 +23,7 @@ scheduling:
     sql: |
       SELECT COUNT(*) >= 1
       FROM cycle_section_summary
-      WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+      WHERE DATE(shift_date) = '{{ ds }}'
     conn_id: "datalog_mysql_conn"
     timeout: 1800      # 30分钟超时
     poke_interval: 300  # 每5分钟检查一次
@@ -50,7 +50,7 @@ extractions:
         ckp_3to4_total_time,
         ckp_7to8_total_time
       FROM cycle_section_summary
-      WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+      WHERE DATE(shift_date) = '{{ ds }}'
     output_key: "raw_cycle_section"
     alt_key: null
 
@@ -79,7 +79,7 @@ extractions:
         PAGE_TIME_7_SUBTASK AS page_time_7_subtask,
         PAGE_TIME_8_SUBTASK AS page_time_8_subtask
       FROM subtarget_vehicle_cycle
-      WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+      WHERE DATE(shift_date) = '{{ ds }}'
     output_key: "raw_cycle_subtarget"
     alt_key: null
 
@@ -99,7 +99,7 @@ extractions:
         (power_consumption/mileage) as power_per_km,
         idle as idle_time
       FROM daily_cycle_overall
-      WHERE DATE(shift_date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+      WHERE DATE(shift_date) = '{{ ds }}'
     output_key: "raw_cycle_summary"
     alt_key: null
 
@@ -111,7 +111,7 @@ extractions:
         TRACTOR_CYCLE_ID AS cycle_id,
         COUNT(*) AS box
       FROM ngen
-      WHERE last_modified_timestamp >= DATE_SUB(CURDATE(), INTERVAL 2 DAY) AND TRACTOR_NO LIKE 'AT%'
+      WHERE last_modified_timestamp >= DATE_SUB('{{ ds }}', INTERVAL 1 DAY) AND TRACTOR_NO LIKE 'AT%'
       GROUP BY TRACTOR_CYCLE_ID
     output_key: "raw_ngen_box_count"
     alt_key: null
@@ -120,11 +120,13 @@ extractions:
 default_args:
   retries: 3
   retry_delay_minutes: 10
+  #email: ["xiyan.zhou@westwell-lab.com","zhishang.feng@westwell-lab.com","feiyang.ling@westwell-lab.com","xiaofu.pan@westwell-lab.com"]
   email: ["xiyan.zhou@westwell-lab.com"]
 
 # 通知配置（告警邮件的收件人）
 notification:
   email_to: ["xiyan.zhou@westwell-lab.com"]
+  #email_to: ["xiyan.zhou@westwell-lab.com","zhishang.feng@westwell-lab.com","feiyang.ling@westwell-lab.com","xiaofu.pan@westwell-lab.com"]
   # email_cc: ["manager@westwell-lab.com"]
 
 # 资产打包配置（可选，默认启用）

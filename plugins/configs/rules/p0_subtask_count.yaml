@@ -1,4 +1,4 @@
-# 如果箱数大于零，任务一定有两个阶段，subtask字段和page_time字段不为空
+# 如果箱数大于零，任务一定有两个阶段，subtask_type_2字段和page_time_2_subtask字段不为空
 meta:
   rule_id: rule_p0_subtask_count
   severity: P0
@@ -12,10 +12,10 @@ target_entity: Cycle
 # 输入数据（从 Context 读取）
 input:
   key: entity_cycle  # 引用 Adapter 写入的实体数据
-  # 过滤条件：subtask_count > 1
+  # 过滤条件：box > 0,subtask_type_2字段或者page_time_2字段为空
 
 logic:
-  filter_expr: "(pl.col('box') > 0) & (pl.col('non_null_subtask_count') > 1) & (pl.col('non_null_page_time_count') > 1)"
+  filter_expr: "(pl.col('box') > 0) & (pl.col('subtask_type_2').is_null() | pl.col('page_time_2_subtask').is_null())"
 
 # 输出配置
 output:
