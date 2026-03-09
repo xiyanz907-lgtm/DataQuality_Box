@@ -1,4 +1,9 @@
-# 如果箱数大于零，任务一定有两个阶段，subtask_type_2字段和page_time_2_subtask字段不为空
+# p0_subtask_count.yaml
+# 规则配置文件（V2）：P0 - 子任务数量校验
+#
+# 功能：如果箱数 > 0，任务一定有两个阶段，subtask_type_2 和 page_time_2_subtask 不为空
+# 治理等级：P0 (Immediate)
+
 meta:
   rule_id: rule_p0_subtask_count
   severity: P0
@@ -6,27 +11,23 @@ meta:
   owner: data-governance@example.com
   created_at: "2026-02-06"
 
-# 目标实体
 target_entity: Cycle
 
-# 输入数据（从 Context 读取）
 input:
-  key: entity_cycle  # 引用 Adapter 写入的实体数据
-  # 过滤条件：box > 0,subtask_type_2字段或者page_time_2字段为空
+  entity_key: entity_cycle
 
 logic:
+  type: filter
   filter_expr: "(pl.col('box') > 0) & (pl.col('subtask_type_2').is_null() | pl.col('page_time_2_subtask').is_null())"
 
-# 输出配置
 output:
-  key: rule_p0_subtask_count_hits  # 写入 Context 的 key
-  stage: RESULT                  # 数据阶段
+  key: rule_p0_subtask_count_hits
+  stage: RESULT
 
-# 告警配置
 alert:
   enabled: true
-  template: "子任务数量异常: {trigger_cycle_ids}"
   title: "[Cycle log]箱数大于0，子任务相关字段为空"
+  trigger_id_field: cycle_id
+  content_template: "发现 {{ hit_count }} 条子任务异常数据（箱数>0但子任务字段为空），Cycle IDs: {{ trigger_ids_preview }}"
 
-# 依赖关系（此规则不依赖其他规则）
 depends_on: []

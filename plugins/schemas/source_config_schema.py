@@ -125,15 +125,35 @@ class AssetPackingConfig(BaseModel):
     table: str = Field(default="auto_test_case_catalog", description="资产元数据表名")
 
 
+class ReportConfig(BaseModel):
+    """结果持久化配置"""
+    enabled: bool = True
+    conn_id: str = Field(default="qa_mysql_conn", description="数据库连接ID")
+
+
+class AdapterConfig(BaseModel):
+    """Adapter 配置项（用于多 Adapter 声明）"""
+    id: str = Field(..., description="Adapter 唯一标识（如 cycle, daily_report）")
+    config_path: str = Field(..., description="Adapter YAML 配置文件路径（相对于 plugins/）")
+
+
 class SourceYAMLConfig(BaseModel):
     """完整的 Source YAML 配置"""
     source_meta: SourceMetaConfig
     scheduling: SchedulingConfig
     extractions: List[ExtractionConfig] = Field(..., min_items=1)
+    adapters: Optional[List[AdapterConfig]] = Field(
+        None,
+        description="Adapter 列表（可选，不配置则从 target_entity 自动推断单 Adapter）"
+    )
     default_args: Optional[DefaultArgsConfig] = None
     notification: Optional[NotificationConfig] = Field(
         None,
         description="通知配置（可选，不配置则使用环境变量 ALERT_EMAIL_TO）"
+    )
+    report: Optional[ReportConfig] = Field(
+        default_factory=lambda: ReportConfig(),
+        description="结果持久化配置（可选，默认启用）"
     )
     asset_packing: Optional[AssetPackingConfig] = Field(
         default_factory=lambda: AssetPackingConfig(),

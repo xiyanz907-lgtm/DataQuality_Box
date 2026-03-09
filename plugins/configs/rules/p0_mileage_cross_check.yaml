@@ -1,0 +1,55 @@
+# p0_mileage_cross_check.yaml
+# 跨表里程校验规则
+#
+# 目的：对比 cycle 实体表每辆车每天的里程总和
+#       与 vehicle_mileage 实体表记录的里程数是否一致
+#
+# 逻辑：
+#   1. 将 entity_cycle 按 (vehicle_id, shift_date) 聚合，求 SUM(mileage)
+#   2. 与 entity_vehicle_mileage LEFT JOIN
+#   3. 过滤出 total_mileage != mileage_distance 的行
+
+meta:
+  rule_id: "rule_p0_mileage_cross_check"
+  severity: "P0"
+  description: "跨表里程校验：Cycle 表聚合里程 vs 车辆每日里程表"
+
+target_entity: "Cycle"  # 属于 Cycle pipeline
+
+input:
+  entity_keys:
+    left: "entity_cycle"
+    right: "entity_total_mileage"
+
+logic:
+  type: cross_entity
+  operation: compare
+
+  # 左表预聚合：cycle 按 (vehicle_id, shift_date) 汇总总里程
+  left_pre_agg:
+    group_by: ["vehicle_id", "shift_date"]
+    agg_exprs:
+      - name: "total_mileage"
+        expr: "col('mileage').sum()"
+
+  # Join 键
+  join_on:
+    left: ["vehicle_id", "shift_date"]
+    right: ["vehicle_id", "shift_date"]
+
+  # 断言：聚合里程 != 车辆每日里程记录  →  命中（不一致）
+  assertion: "col('total_mileage') != col('mileage_distance')"
+
+output:
+  key: "rule_p0_mileage_cross_check_hits"
+  stage: "RESULT"
+
+alert:
+  enabled: true
+  title: "[跨表校验] 车辆每日里程不一致"
+  trigger_id_field: "vehicle_id"
+  content_template: >
+    发现 {{ hit_count }} 条里程不一致数据（Cycle 聚合里程 ≠ 车辆每日里程表），
+    Vehicle IDs: {{ trigger_ids_preview }}
+
+depends_on: []

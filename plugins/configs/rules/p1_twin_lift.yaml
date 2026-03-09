@@ -1,11 +1,10 @@
 # p1_twin_lift.yaml
-# 规则配置文件：P1 - 双箱作业挖掘
+# 规则配置文件（V2）：P1 - 双箱作业挖掘
 #
 # 功能：识别 is_twin_lift == 1 的高价值特征数据
 # 治理等级：P1 (Asset)
 # 处理方式：打标、豁免、打包
 
-# 规则元信息
 meta:
   rule_id: rule_p1_twin_lift
   severity: P1
@@ -13,29 +12,32 @@ meta:
   owner: data-governance@example.com
   created_at: "2026-01-23"
 
-# 目标实体
 target_entity: Cycle
 
-# 输入数据（从 Context 读取）
 input:
-  key: entity_cycle  # 引用 Adapter 写入的实体数据
+  entity_key: entity_cycle
 
-# 规则逻辑（Polars 表达式）
 logic:
-  # 过滤条件：is_twin_lift == 1
+  type: filter
   filter_expr: "pl.col('is_twin_lift') == 1"
 
-# 输出配置
 output:
-  key: rule_p1_twin_lift_hits  # 写入 Context 的 key
-  stage: RESULT                 # 数据阶段
+  key: rule_p1_twin_lift_hits
+  stage: RESULT
 
-# 资产配置
+# P1 资产配置（数据驱动字段映射）
 asset:
   enabled: true
-  tag: "twin_lift"             # 资产标签
-  category: "feature"           # 资产类别
-  title: "双箱作业识别"
+  asset_type: TWIN_LIFT_SCENARIO
+  field_mapping:
+    asset_id: cycle_id
+    vehicle_id: vehicle_id
+    start_ts: start_time
+    end_ts: end_time
+  tags:
+    - twin_lift
+    - feature
+    - high_value
+  target_path_template: "corner_case/{batch_id}/{asset_id}/"
 
-# 依赖关系（此规则不依赖其他规则）
 depends_on: []

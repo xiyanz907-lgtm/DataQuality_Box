@@ -14,6 +14,9 @@ DAG_ID = "maintenance_cleanup"
 SCHEDULE = "0 2 * * *"  # 每天凌晨 2:00 运行
 RETENTION_DAYS_XCOM = 7  # XCom 保留 7 天
 RETENTION_DAYS_LOGS = 30 # DB 日志保留 30 天
+RETENTION_DAYS_RULE_RESULTS = 90   # 规则明细保留 90 天
+RETENTION_DAYS_RUN_SUMMARY = 365   # 运行汇总保留 365 天
+GOVERNANCE_REPORT_CONN_ID = "qa_mysql_conn"
 BATCH_SIZE = 5000       # 每次删除的批次大小，防止锁表
 
 default_args = {
@@ -104,5 +107,28 @@ with DAG(
         python_callable=_cleanup_db_logs,
     )
 
-    cleanup_xcom_task >> cleanup_logs_task
+    def _cleanup_governance_reports():
+        """清理过期的治理报表数据（qa_mysql_conn 数据库）"""
+        from airflow.providers.mysql.hooks.mysql import MySqlHook
+
+        hook = MySqlHook(mysql_conn_id=GOVERNANCE_REPORT_CONN_ID)
+
+        rule_results_deleted = hook.run(
+            "DELETE FROM governance_rule_results WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)",
+            parameters=(RETENTION_DAYS_RULE_RESULTS,),
+        )
+        logging.info(f"governance_rule_results: cleaned rows older than {RETENTION_DAYS_RULE_RESULTS} days")
+
+        run_summary_deleted = hook.run(
+            "DELETE FROM governance_run_summary WHERE created_at < DATE_SUB(NOW(), INTERVAL %s DAY)",
+            parameters=(RETENTION_DAYS_RUN_SUMMARY,),
+        )
+        logging.info(f"governance_run_summary: cleaned rows older than {RETENTION_DAYS_RUN_SUMMARY} days")
+
+    cleanup_governance_task = PythonOperator(
+        task_id="cleanup_governance_reports",
+        python_callable=_cleanup_governance_reports,
+    )
+
+    cleanup_xcom_task >> cleanup_logs_task >> cleanup_governance_task
 

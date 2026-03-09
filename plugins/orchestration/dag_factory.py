@@ -24,6 +24,7 @@ from plugins.operators.loader import UniversalLoaderOperator
 from plugins.operators.adapter import DomainAdapterOperator
 from plugins.operators.rule_engine import GenericRuleOperator
 from plugins.operators.aggregator import ContextAggregatorOperator
+from plugins.operators.report_writer import ReportWriterOperator
 from plugins.operators.dispatcher import NotificationDispatcherOperator
 from plugins.orchestration.rule_scanner import RuleScanner
 from plugins.datasets import GOVERNANCE_ASSET_DATASET
@@ -171,11 +172,59 @@ class DAGFactory:
         
         return result
     
+    def _resolve_adapters(self, config: SourceYAMLConfig) -> List[Dict[str, str]]:
+        """
+        解析 Adapter 配置列表
+        
+        策略：
+        1. 如果 YAML 中显式声明了 adapters，使用声明列表
+        2. 否则按 target_entity 自动推断单 Adapter（向后兼容）
+        
+        Returns:
+            [{'id': 'cycle', 'config_path': '/abs/path/to/cycle_adapter.yaml'}, ...]
+        """
+        if config.adapters:
+            # 显式声明：解析相对路径为绝对路径
+            result = []
+            airflow_home = os.getenv('AIRFLOW_HOME', '/opt/airflow')
+            for adapter in config.adapters:
+                if os.path.isabs(adapter.config_path):
+                    abs_path = adapter.config_path
+                else:
+                    abs_path = os.path.join(airflow_home, 'plugins', adapter.config_path)
+                result.append({'id': adapter.id, 'config_path': abs_path})
+            return result
+        
+        # 向后兼容：自动推断
+        entity_name = config.source_meta.target_entity.lower()
+        adapter_path = self.adapters_dir / f"{entity_name}_adapter.yaml"
+        return [{'id': entity_name, 'config_path': str(adapter_path)}]
+    
+    def _collect_pipeline_entities(self, adapter_configs: List[Dict[str, str]]) -> set:
+        """
+        从 Adapter YAML 中收集 pipeline 所产出的 target_entity 集合
+        
+        Returns:
+            {'Cycle', 'VehicleMileage', ...}
+        """
+        entities = set()
+        for adapter_cfg in adapter_configs:
+            try:
+                with open(adapter_cfg['config_path'], 'r', encoding='utf-8') as f:
+                    adapter_yaml = yaml.safe_load(f)
+                entity_name = adapter_yaml.get('target_entity')
+                if entity_name:
+                    entities.add(entity_name)
+            except Exception as e:
+                logger.warning(f"⚠️ Cannot read adapter {adapter_cfg['config_path']}: {e}")
+        return entities
+
     def _build_task_pipeline(self, config: SourceYAMLConfig, dag: DAG, sensor_config: Any):
         """
         构建完整的任务流水线
         
-        Pipeline: [Sensor] -> Loader -> Adapter -> Rules -> Aggregator -> Dispatcher
+        单 Adapter:  [Sensor] -> Loader -> Adapter -> Rules -> Aggregator -> [ReportWriter] -> Dispatcher
+        多 Adapter:  [Sensor] -> Loader -> [Adapter1, Adapter2] -> merge_entities -> Rules -> Aggregator -> [ReportWriter] -> Dispatcher
         """
         # ========== Step 1: 可选 Sensor ==========
         prev_task = None
@@ -196,36 +245,107 @@ class DAGFactory:
             prev_task >> loader
         prev_task = loader
         
-        # ========== Step 3: Domain Adapter ==========
-        # 根据 target_entity 自动加载 adapter 配置
-        adapter_config_path = self.adapters_dir / f"{config.source_meta.target_entity.lower()}_adapter.yaml"
+        # ========== Step 3: Domain Adapters (支持多 Adapter 并行) ==========
+        adapter_configs = self._resolve_adapters(config)
         
-        if not adapter_config_path.exists():
-            logger.warning(f"⚠️ Adapter config not found: {adapter_config_path}, skipping adapter")
-            # 如果没有 adapter，后续无法执行规则，直接返回
+        # 验证所有 adapter 配置文件存在
+        valid_adapters = []
+        for ac in adapter_configs:
+            if os.path.exists(ac['config_path']):
+                valid_adapters.append(ac)
+            else:
+                logger.warning(f"⚠️ Adapter config not found: {ac['config_path']}, skipping")
+        
+        if not valid_adapters:
+            logger.warning("⚠️ No valid adapter configs found, cannot build rule pipeline")
             return
         
-        adapter = DomainAdapterOperator(
-            task_id="domain_adapter",
-            config_path=str(adapter_config_path),
-            upstream_task_id="universal_loader",
-            dag=dag
-        )
-        prev_task >> adapter
+        # 收集 pipeline 产出的实体集合（用于规则匹配）
+        pipeline_entities = self._collect_pipeline_entities(valid_adapters)
+        logger.info(f"🏷️ Pipeline entities: {pipeline_entities}")
+        
+        if len(valid_adapters) == 1:
+            # ---- 单 Adapter：向后兼容原有逻辑 ----
+            airflow_home = os.getenv('AIRFLOW_HOME', '/opt/airflow')
+            plugins_dir = os.path.join(airflow_home, 'plugins')
+            rel_path = os.path.relpath(valid_adapters[0]['config_path'], plugins_dir)
+            
+            adapter = DomainAdapterOperator(
+                task_id="domain_adapter",
+                config_path=rel_path,
+                upstream_task_id="universal_loader",
+                dag=dag
+            )
+            prev_task >> adapter
+            rule_upstream_task_id = "domain_adapter"
+            rule_upstream_task = adapter
+        else:
+            # ---- 多 Adapter：并行执行 + Context 合并 ----
+            airflow_home = os.getenv('AIRFLOW_HOME', '/opt/airflow')
+            plugins_dir = os.path.join(airflow_home, 'plugins')
+            adapter_task_ids = []
+            
+            with TaskGroup(group_id="adapters", dag=dag) as adapter_group:
+                for ac in valid_adapters:
+                    rel_path = os.path.relpath(ac['config_path'], plugins_dir)
+                    adapter_task = DomainAdapterOperator(
+                        task_id=f"adapt_{ac['id']}",
+                        config_path=rel_path,
+                        upstream_task_id="universal_loader",
+                        dag=dag
+                    )
+                    adapter_task_ids.append(f"adapters.adapt_{ac['id']}")
+            
+            prev_task >> adapter_group
+            
+            # Context 合并任务：将多个 Adapter 的 Context 合并为一个
+            def merge_entity_contexts(adapter_task_ids_list: List[str], **context):
+                """合并多个 Adapter Context 的 data_registry"""
+                from plugins.domian.context import GovernanceContext
+                from plugins.infra.operators import get_multiple_upstream_contexts
+                
+                ti = context['task_instance']
+                contexts = get_multiple_upstream_contexts(ti, adapter_task_ids_list)
+                
+                if not contexts:
+                    raise ValueError("No upstream adapter contexts found!")
+                
+                # 以第一个 context 为基础，合并其他 context 的 data_registry 和 alt_key_index
+                merged = contexts[0]
+                for ctx in contexts[1:]:
+                    merged.data_registry.update(ctx.data_registry)
+                    merged._alt_key_index.update(ctx._alt_key_index)
+                    merged.audit_logs.extend(ctx.audit_logs)
+                
+                logger.info(
+                    f"✅ Merged {len(contexts)} adapter contexts: "
+                    f"{list(merged.data_registry.keys())}"
+                )
+                return merged.to_json()
+            
+            merge_task = PythonOperator(
+                task_id='merge_entity_contexts',
+                python_callable=merge_entity_contexts,
+                op_kwargs={'adapter_task_ids_list': adapter_task_ids},
+                dag=dag
+            )
+            adapter_group >> merge_task
+            rule_upstream_task_id = "merge_entity_contexts"
+            rule_upstream_task = merge_task
         
         # ========== Step 4: 动态规则扫描 ==========
-        # 扫描所有 target_entity 匹配的规则
+        # 扫描所有 target_entity 属于 pipeline_entities 的规则
         all_rules = self.rule_scanner.scan_rules()
         target_rules = [
             rule for rule in all_rules 
-            if rule.get('target_entity') == config.source_meta.target_entity
+            if rule.get('target_entity') in pipeline_entities
         ]
         
         if not target_rules:
-            logger.warning(f"⚠️ No rules found for entity: {config.source_meta.target_entity}")
+            logger.warning(f"⚠️ No rules found for entities: {pipeline_entities}")
             return
         
-        logger.info(f"📋 Found {len(target_rules)} rules for {config.source_meta.target_entity}")
+        logger.info(f"📋 Found {len(target_rules)} rules for {pipeline_entities}")
         
         # 创建规则任务组
         with TaskGroup(group_id="rule_tasks", dag=dag) as rule_group:
@@ -236,7 +356,7 @@ class DAGFactory:
                 rule_task = GenericRuleOperator(
                     task_id=rule['rule_id'],
                     config_dict=rule['config'],  # 传递完整的 YAML 配置
-                    upstream_task_id="domain_adapter",
+                    upstream_task_id=rule_upstream_task_id,
                     dag=dag
                 )
                 rule_tasks_dict[rule['rule_id']] = rule_task
@@ -255,17 +375,37 @@ class DAGFactory:
                         else:
                             logger.warning(f"⚠️ Rule '{rule_id}' depends on '{dep_rule_id}', but not found!")
         
-        adapter >> rule_group
+        rule_upstream_task >> rule_group
         
         # ========== Step 5: Context Aggregator ==========
         aggregator = ContextAggregatorOperator(
             task_id="context_aggregator",
             rule_task_ids=[f"rule_tasks.{rule['rule_id']}" for rule in target_rules],
+            rules_dir='configs/rules',  # 方案B：Aggregator 自己扫描规则目录
             dag=dag
         )
         rule_group >> aggregator
         
-        # ========== Step 6: Notification Dispatcher ==========
+        # ========== Step 6: Report Writer (可选) ==========
+        dispatcher_upstream_task_id = "context_aggregator"
+        prev_task_before_dispatcher = aggregator
+
+        if config.report and config.report.enabled:
+            report_writer = ReportWriterOperator(
+                task_id="report_writer",
+                conn_id=config.report.conn_id,
+                rules_dir='configs/rules',
+                upstream_task_id="context_aggregator",
+                dag=dag
+            )
+            aggregator >> report_writer
+            dispatcher_upstream_task_id = "report_writer"
+            prev_task_before_dispatcher = report_writer
+            logger.info(f"📊 Report writer enabled: conn_id={config.report.conn_id}")
+        else:
+            logger.info("📭 Report writer disabled, skipping")
+
+        # ========== Step 7: Notification Dispatcher ==========
         dispatcher_config = {}
         if config.notification:
             dispatcher_config['email_to'] = ','.join(config.notification.email_to)
@@ -275,12 +415,12 @@ class DAGFactory:
         dispatcher = NotificationDispatcherOperator(
             task_id="notification_dispatcher",
             config_dict=dispatcher_config if dispatcher_config else None,
-            upstream_task_id="context_aggregator",
+            upstream_task_id=dispatcher_upstream_task_id,
             dag=dag
         )
-        aggregator >> dispatcher
+        prev_task_before_dispatcher >> dispatcher
         
-        # ========== Step 7: Save Assets to Queue (触发 DAG B) ==========
+        # ========== Step 8: Save Assets to Queue (触发 DAG B) ==========
         # 根据 asset_packing 配置决定是否添加此任务
         if config.asset_packing and config.asset_packing.enabled:
             asset_config = config.asset_packing

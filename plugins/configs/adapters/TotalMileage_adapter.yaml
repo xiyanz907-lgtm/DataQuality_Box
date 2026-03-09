@@ -1,0 +1,31 @@
+# vehicle_mileage_adapter.yaml
+# 领域适配器配置：车辆每日里程表
+#
+# 功能：将原始数据映射为领域实体（VehicleMileage）
+# 数据源：history_total_mileage 表（每辆车每天的里程汇总）
+# 使用者：DomainAdapterOperator
+
+# 目标实体
+target_entity: "TotalMileage"
+
+# 输出键（写入 Context 的 key）
+output_key: "entity_total_mileage"
+
+# 输入数据架构
+input_schema:
+  # 主表（必需）
+  primary_source: "raw_total_mileage"  # 引用 Loader 写入的数据
+
+# 字段映射
+fields:
+  - target: "vehicle_id"
+    source_expr: "col('vehicle_id')"
+
+  - target: "site_type"
+    source_expr: "col('site_type')"
+
+  - target: "shift_date"
+    source_expr: "col('shift_date')"
+
+  - target: "mileage_distance"
+    source_expr: "col('mileage_distance')"

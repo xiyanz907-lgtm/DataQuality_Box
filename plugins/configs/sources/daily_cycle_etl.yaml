@@ -116,6 +116,28 @@ extractions:
     output_key: "raw_ngen_box_count"
     alt_key: null
 
+  - id: "raw_total_mileage"
+    source_type: "mysql"
+    conn_id: "datalog_mysql_conn"
+    query: |
+      SELECT
+        id,
+        site_type,
+        vehicle_id,
+        shift_date,
+        mileage_distance
+      FROM history_total_mileage
+      WHERE DATE(shift_date) = '{{ ds }}'
+    output_key: "raw_total_mileage"
+    alt_key: null
+
+# Adapter 配置（多 Adapter 并行）
+adapters:
+  - id: "cycle"
+    config_path: "configs/adapters/cycle_adapter.yaml"
+  - id: "TotalMileage"
+    config_path: "configs/adapters/TotalMileage_adapter.yaml"
+
 # 可选：覆盖全局 default_args
 default_args:
   retries: 3
@@ -128,6 +150,11 @@ notification:
   email_to: ["xiyan.zhou@westwell-lab.com"]
   #email_to: ["xiyan.zhou@westwell-lab.com","zhishang.feng@westwell-lab.com","feiyang.ling@westwell-lab.com","xiaofu.pan@westwell-lab.com"]
   # email_cc: ["manager@westwell-lab.com"]
+
+# 结果持久化配置（可选，默认启用）
+report:
+  enabled: true
+  conn_id: "qa_mysql_conn"
 
 # 资产打包配置（可选，默认启用）
 asset_packing:

@@ -1,31 +1,33 @@
-# Checkpoint log部分阶段任务不可为空
+# p0_ckp_check.yaml
+# 规则配置文件（V2）：P0 - Checkpoint log 阶段任务非空校验
+#
+# 功能：Checkpoint log 部分阶段任务不可为空（3-4 / 7-8）
+# 治理等级：P0 (Immediate)
+
 meta:
   rule_id: rule_p0_ckp_check
   severity: P0
-  description: "Checkpoint log部分阶段任务不可为空：3-4"
+  description: "Checkpoint log部分阶段任务不可为空：3-4/7-8"
   owner: data-governance@example.com
   created_at: "2026-02-28"
 
-# 目标实体
 target_entity: Cycle
 
-# 输入数据（从 Context 读取）
 input:
-  key: entity_cycle  # 引用 Adapter 写入的实体数据
+  entity_key: entity_cycle
 
 logic:
+  type: filter
   filter_expr: "pl.col('ckp_3to4_total_time').is_null() | pl.col('ckp_7to8_total_time').is_null()"
 
-# 输出配置
 output:
-  key: rule_p0_ckp_check_hits  # 写入 Context 的 key
-  stage: RESULT                  # 数据阶段
+  key: rule_p0_ckp_check_hits
+  stage: RESULT
 
-# 告警配置
 alert:
   enabled: true
-  template: "Checkpoint log部分阶段任务不可为空: {trigger_cycle_ids}"
   title: "[Checkpoint log]有阶段任务为空：3-4/7-8"
+  trigger_id_field: cycle_id
+  content_template: "发现 {{ hit_count }} 条阶段任务为空数据，Cycle IDs: {{ trigger_ids_preview }}"
 
-# 依赖关系（此规则不依赖其他规则）
 depends_on: []
