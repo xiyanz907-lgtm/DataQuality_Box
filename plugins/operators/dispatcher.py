@@ -186,12 +186,14 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
             return templates[template_key].format(batch_id=ctx.batch_id, count=count)
         
         # 默认模板
-        prefix = "🔴 [紧急]" if severity == "P0" else "⚠️"
+        site = os.getenv('SITE_NAME', '')
+        site_tag = f"[{site}] " if site else ""
+        prefix = "🔴" if severity == "P0" else "⚠️"
         
         if rule_id:
-            return f"{prefix} [{ctx.batch_id}] {severity} 告警 - {rule_id}"
+            return f"{site_tag}{prefix} [{ctx.batch_id}] {severity} 告警 - {rule_id}"
         else:
-            return f"{prefix} [{ctx.batch_id}] {severity} 告警汇总 ({count} 条)"
+            return f"{site_tag}{prefix} [{ctx.batch_id}] {severity} 告警汇总 ({count} 条)"
     
     def _build_single_alert_body(
         self, 
@@ -251,7 +253,7 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
                     </div>
                     
                     <div class="cycle-ids">
-                        <strong>触发数据 (Cycle IDs):</strong><br>
+                        <strong>触发数据 ({self._get_trigger_id_label(alert.trigger_id_field)}):</strong><br>
                         {', '.join(str(cid) for cid in trigger_ids_preview)}
                         {'<br><em>… 还有 {} 条</em>'.format(len(alert.trigger_cycle_ids) - 10) if has_more else ''}
                     </div>
@@ -264,6 +266,18 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
         
         return body
     
+    _TRIGGER_ID_LABELS = {
+        "cycle_id": "作业号",
+        "vehicle_id": "车号",
+        "container_id": "箱号",
+        "task_id": "任务号",
+    }
+
+    @classmethod
+    def _get_trigger_id_label(cls, field_name: str) -> str:
+        """将 trigger_id_field 转为可读的中文标签"""
+        return cls._TRIGGER_ID_LABELS.get(field_name, field_name)
+
     def _build_p0_batch_body(
         self, 
         alerts: List[AlertItem], 
@@ -289,12 +303,15 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
             if len(alert.trigger_cycle_ids) > 5:
                 ids_text += f" ... (+{len(alert.trigger_cycle_ids) - 5})"
             
+            id_label = self._get_trigger_id_label(alert.trigger_id_field)
+            
             rule_rows += f"""
             <tr>
                 <td>{alert.rule_id}</td>
                 <td>{alert.title}</td>
                 <td class="num">{len(alert.trigger_cycle_ids)}</td>
-                <td class="cycle-ids">{ids_text}</td>
+                <td class="id-type">{id_label}</td>
+                <td class="trigger-ids">{ids_text}</td>
             </tr>
             """
         
@@ -303,7 +320,7 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
         <head>
             <style>
                 body {{ font-family: -apple-system, 'Segoe UI', Arial, sans-serif; color: #333; margin: 0; padding: 0; background-color: #f9f9f9; }}
-                .wrapper {{ max-width: 720px; margin: 20px auto; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; }}
+                .wrapper {{ max-width: 800px; margin: 20px auto; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; }}
                 .header {{ padding: 16px 24px; border-bottom: 1px solid #e0e0e0; }}
                 .header h2 {{ margin: 0; font-size: 17px; font-weight: 600; color: #1a1a1a; }}
                 .severity-tag {{ display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 3px; margin-right: 8px; background-color: #fdecea; color: #b71c1c; }}
@@ -317,7 +334,8 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
                 td {{ padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }}
                 tr:last-child td {{ border-bottom: none; }}
                 .num {{ text-align: center; font-weight: 600; }}
-                .cycle-ids {{ color: #999; font-size: 11px; max-width: 280px; word-break: break-all; }}
+                .id-type {{ color: #666; font-size: 12px; white-space: nowrap; }}
+                .trigger-ids {{ color: #999; font-size: 11px; max-width: 260px; word-break: break-all; }}
                 .footer {{ padding: 12px 24px; border-top: 1px solid #f0f0f0; font-size: 11px; color: #aaa; }}
             </style>
         </head>
@@ -351,7 +369,8 @@ class NotificationDispatcherOperator(BaseGovernanceOperator):
                             <th>规则 ID</th>
                             <th>说明</th>
                             <th style="text-align:center;">命中数</th>
-                            <th>Cycle IDs</th>
+                            <th>标识类型</th>
+                            <th>触发标识</th>
                         </tr>
                         {rule_rows}
                     </table>

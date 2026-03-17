@@ -48,6 +48,7 @@ services:
       - _AIRFLOW_WWW_USER_EMAIL=${AIRFLOW_ADMIN_EMAIL}
 
             # 【注入普通变量】
+      - SITE_NAME=${SITE_NAME:-DefaultSite}
       - SITE_TIMEZONE=${SITE_TIMEZONE}
       - ALERT_EMAIL_TO=${ALERT_EMAIL_TO}
       - RECON_EMAIL_TO=${RECON_EMAIL_TO}
