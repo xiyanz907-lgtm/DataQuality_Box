@@ -1,0 +1,29 @@
+#task_type字段为空
+
+meta:
+  rule_id: R06_task_type_check
+  severity: P0
+  description: "task_type字段为空"
+  owner: data-governance@example.com
+  created_at: "2026-03-16"
+
+target_entity: Cycle
+
+input:
+  entity_key: entity_cycle
+
+logic:
+  type: filter
+  filter_expr: "pl.col('task_type') == ''"
+
+output:
+  key: rule_p0_task_type_check_hits
+  stage: RESULT
+
+alert:
+  enabled: true
+  title: "[Cycle_log]task_type字段为空"
+  trigger_id_field: cycle_id
+  content_template: "发现 {{ hit_count }} 条task_type字段为空数据，Cycle IDs: {{ trigger_ids_preview }}"
+
+depends_on: []

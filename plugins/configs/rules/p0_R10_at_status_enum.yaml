@@ -1,0 +1,26 @@
+# state枚举值目前只有 0，1，2，offline，筛选出枚举值之外的异常值
+meta:
+  rule_id: R10_at_status_enum_check
+  severity: P0
+  description: "AT 状态码枚举校验：state 只允许 0/1/2/offline"
+  owner: data-governance@example.com
+  created_at: "2026-03-16"
+
+target_entity: Cycle    # 暂挂在这个entity下
+
+input:
+  entity_key: "raw_at_status"
+
+logic:
+  type: filter
+  filter_expr: "~col('state').cast(pl.Utf8).is_in(['0', '1', '2', 'offline'])"
+
+alert:
+  enabled: true
+  title: "[AT_STATUS] AT 状态码枚举校验：state 只允许 0/1/2/offline"
+  trigger_id_field: "vehicle_id"
+  content_template: >
+   发现 {{ hit_count }} 条异常状态码记录（不在 0/1/2/offline 范围内），
+    Vehicle IDs: {{ trigger_ids_preview }}
+
+depends_on: []

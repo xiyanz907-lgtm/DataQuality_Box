@@ -29,11 +29,11 @@ input_schema:
       right_on: "cycle_id"
       suffix: "_summary"
 
-    # - join_source: "raw_ngen_box_count"  # 要 Join 的数据源
-    #   type: "left"
-    #   left_on: "cycle_id"
-    #   right_on: "cycle_id"
-    #   suffix: "_ngen"
+    - join_source: "raw_ngen_box_count"  # 要 Join 的数据源
+      type: "left"
+      left_on: "cycle_id"
+      right_on: "cycle_id"
+      suffix: "_ngen"
 # 字段映射（列表格式，每个字段一个配置）
 fields:
   # 1. 从主表 cycle_section_summary 表获取字段
@@ -70,11 +70,35 @@ fields:
   - target: "power_consumption"
     source_expr: "col('power_consumption')"
 
-  - target: "ckp_3to4_total_time"
-    source_expr: "col('ckp_3to4_total_time')"
+  - target: "ckp_1to2_total_time"
+    source_expr: "col('ckp_1to2_total_time').cast(pl.Float64, strict=False)"
 
+  - target: "ckp_2to3_total_time"
+    source_expr: "col('ckp_2to3_total_time').cast(pl.Float64, strict=False)"
+
+  - target: "ckp_3to4_total_time"
+    source_expr: "col('ckp_3to4_total_time').cast(pl.Float64, strict=False)"
+
+  - target: "ckp_4to5_total_time"
+    source_expr: "col('ckp_4to5_total_time').cast(pl.Float64, strict=False)"
+
+  - target: "ckp_5to6_total_time"
+    source_expr: "col('ckp_5to6_total_time').cast(pl.Float64, strict=False)"
+
+  - target: "ckp_6to7_total_time"
+    source_expr: "col('ckp_6to7_total_time').cast(pl.Float64, strict=False)"
+  
   - target: "ckp_7to8_total_time"
-    source_expr: "col('ckp_7to8_total_time')"
+    source_expr: "col('ckp_7to8_total_time').cast(pl.Float64, strict=False)"
+
+  - target: "ckp_8to9_total_time"
+    source_expr: "col('ckp_8to9_total_time').cast(pl.Float64, strict=False)"
+
+  - target: "ckp_others_total_time"
+    source_expr: "col('ckp_others_total_time').cast(pl.Float64, strict=False)"
+
+  - target: "total_time"
+    source_expr: "(col('ckp_1to2_total_time').cast(pl.Float64, strict=False).fill_null(0) + col('ckp_2to3_total_time').cast(pl.Float64, strict=False).fill_null(0) + col('ckp_3to4_total_time').cast(pl.Float64, strict=False).fill_null(0) + col('ckp_4to5_total_time').cast(pl.Float64, strict=False).fill_null(0) + col('ckp_5to6_total_time').cast(pl.Float64, strict=False).fill_null(0) + col('ckp_6to7_total_time').cast(pl.Float64, strict=False).fill_null(0) + col('ckp_7to8_total_time').cast(pl.Float64, strict=False).fill_null(0) + col('ckp_8to9_total_time').cast(pl.Float64, strict=False).fill_null(0) + col('ckp_others_total_time').cast(pl.Float64, strict=False).fill_null(0)) * 60"
 
   # 2. 从 subtarget_vehicle_cycle 表获取字段
   # 注：如果字段名不重复，Polars 不会添加后缀
@@ -156,7 +180,7 @@ fields:
         pl.col('page_time_8_subtask').is_not_null(),
       )
 
-  # 3. 从 cycle_section_summary 表获取字段
+  # 3. 从 daily_cycle_overall 表获取字段
 
   - target: "total_speed"
     source_expr: "col('total_speed')"
@@ -166,6 +190,9 @@ fields:
 
   - target: "total_size"
     source_expr: "col('total_size')"
+
+  - target: "mileage_daily"
+    source_expr: "col('mileage')"
 
   - target: "mileage_all"
     source_expr: "col('mileage_all')"
@@ -180,8 +207,8 @@ fields:
     source_expr: "col('idle_time')"
   
   # 4. 差值字段
-  # - target: "diff_box_count_ngen"
-  #   source_expr: "col('box') - col('box_ngen')"
+  - target: "diff_box_count_ngen"
+    source_expr: "col('box') - col('box_ngen')"
   
   - target: "diff_box_count1"
     source_expr: "col('box') - col('box_subtarget')"

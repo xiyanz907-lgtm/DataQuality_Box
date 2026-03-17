@@ -1,0 +1,31 @@
+meta:
+  rule_id: R09_total_mileage_check
+  severity: P0
+  description: "单车总里程校验：识别单车当天总里程大于200公里的异常数据"
+  owner: data-governance@example.com
+  created_at: "2026-03-13"
+
+target_entity: TotalMileage
+
+input:
+  entity_key: entity_total_mileage
+
+logic:
+  type: aggregate
+  group_by: ["vehicle_id"]
+  agg_exprs:
+    - name: "sum_mileage_distance"
+      expr: "col('mileage_distance').sum()"
+  having_expr: "col('sum_mileage_distance') > 200"
+
+output:
+  key: rule_p0_total_mileage_check_hits
+  stage: RESULT
+
+alert:
+  enabled: true
+  title: "[TotalMileage]单车总里程大于200公里"
+  trigger_id_field: vehicle_id
+  content_template: "发现 {{ hit_count }} 条总里程异常数据，Vehicle IDs: {{ trigger_ids_preview }}"
+
+depends_on: []

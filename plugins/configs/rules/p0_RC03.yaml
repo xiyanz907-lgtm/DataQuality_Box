@@ -1,0 +1,42 @@
+# Daily report 中的总作业时长应近似等于 Cycle log 中所有作业时长之和
+# Daily_report 中的总作业时长: sum(daily_cycle_overall.total_size) 秒
+# Cycle log 中所有作业时长之和: sum(cycle_section_summary.running_time) 分钟
+#
+# 聚合粒度: (vehicle_id, shift_date)
+# 判定: 两者差异绝对值 > 60 秒视为异常（容忍浮点精度误差）
+
+meta:
+  rule_id: RC03_running_time_check
+  severity: P0
+  description: "总作业时长校验：Daily report 总时长 vs Cycle log 总时长"
+  owner: data-governance@example.com
+  created_at: "2026-03-16"
+
+target_entity: Cycle
+
+input:
+  entity_key: entity_cycle
+
+logic:
+  type: aggregate
+  group_by: ["vehicle_id", "shift_date"]
+  agg_exprs:
+    - name: "sum_total_size_sec"
+      expr: "col('total_size').sum()"
+    - name: "sum_running_time_sec"
+      expr: "(col('running_time') * 60).sum()"
+  having_expr: "(col('sum_total_size_sec') - col('sum_running_time_sec')).abs() > lit(60)"
+
+output:
+  key: rule_p0_running_time_check_hits
+  stage: RESULT
+
+alert:
+  enabled: true
+  title: "[Daily_Report/Cycle_Log] Daily report 与 Cycle log 总作业时长不一致（差异>60秒）"
+  trigger_id_field: "vehicle_id"
+  content_template: >
+    发现 {{ hit_count }} 个(车辆×日期)组合的总作业时长不一致（差异>60秒），
+    Vehicle IDs: {{ trigger_ids_preview }}
+
+depends_on: []

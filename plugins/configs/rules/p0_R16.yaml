@@ -1,0 +1,28 @@
+# 空闲时长一定会小于作业时长
+# IDLE_TIME < OPERATION_HOUR
+# Cycle Entity中的 idle_time (hours) 小于 total_size(seconds)
+meta:
+  rule_id: R16_idle_time_check
+  severity: P0
+  description: "识别空闲时长大于或等于作业时长的异常数据"
+  owner: data-governance@example.com
+  created_at: "2026-03-16"
+
+target_entity: Cycle
+
+input:
+  entity_key: entity_cycle
+
+logic:
+  type: filter
+  filter_expr: "col('idle_time') >= col('total_size') / 3600"
+
+alert:
+  enabled: true
+  title: "[Daily_Report] 空闲时长大于或等于作业时长"
+  trigger_id_field: cycle_id
+  content_template: >
+   发现 {{ hit_count }} 条空闲时长大于或等于作业时长数据，
+    Cycle IDs: {{ trigger_ids_preview }}
+
+depends_on: []

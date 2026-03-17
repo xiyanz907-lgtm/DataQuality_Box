@@ -5,7 +5,7 @@
 # 治理等级：P0 (Immediate)
 
 meta:
-  rule_id: rule_p0_kwh_per_km
+  rule_id: R14_kwh_per_km
   severity: P0
   description: "每公里电耗校验：识别每公里电耗异常的数据"
   owner: data-governance@example.com

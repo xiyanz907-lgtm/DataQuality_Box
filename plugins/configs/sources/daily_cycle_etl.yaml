@@ -47,8 +47,15 @@ extractions:
         running_time,
         mileage,
         power_consumption,
+        ckp_1to2_total_time,
+        ckp_2to3_total_time,
         ckp_3to4_total_time,
-        ckp_7to8_total_time
+        ckp_4to5_total_time,
+        ckp_5to6_total_time,
+        ckp_6to7_total_time,
+        ckp_7to8_total_time,
+        ckp_8to9_total_time,
+        ckp_others_total_time
       FROM cycle_section_summary
       WHERE DATE(shift_date) = '{{ ds }}'
     output_key: "raw_cycle_section"
@@ -91,7 +98,7 @@ extractions:
         cycle_id,
         box,
         total_size,
-        mileage,
+        mileage as mileage_summary,
         mileage_all,
         total_speed,
         total_travel_speed,
@@ -109,7 +116,7 @@ extractions:
     query: |
       SELECT
         TRACTOR_CYCLE_ID AS cycle_id,
-        COUNT(*) AS box
+        COUNT(*) AS box_ngen
       FROM ngen
       WHERE last_modified_timestamp >= DATE_SUB('{{ ds }}', INTERVAL 1 DAY) AND TRACTOR_NO LIKE 'AT%'
       GROUP BY TRACTOR_CYCLE_ID
@@ -129,6 +136,28 @@ extractions:
       FROM history_total_mileage
       WHERE DATE(shift_date) = '{{ ds }}'
     output_key: "raw_total_mileage"
+    alt_key: null
+
+  - id: "raw_at_status"
+    source_type: "mysql"
+    conn_id: "datalog_mysql_conn"
+    query: |
+      SELECT vehicle_id, shift_date, start_time, end_time, state
+      FROM history_at_status
+      WHERE DATE(shift_date) = '{{ ds }}'
+    output_key: "raw_at_status"
+    alt_key: null
+
+  - id: "raw_at_status_working"
+    source_type: "mysql"
+    conn_id: "datalog_mysql_conn"
+    depend_on: ["raw_at_status"]
+    query: |
+      SELECT DISTINCT vehicle_id, shift_date
+      FROM history_at_status
+      WHERE DATE(shift_date) = '{{ ds }}'
+      AND state = 0
+    output_key: "raw_at_status_working"
     alt_key: null
 
 # Adapter 配置（多 Adapter 并行）

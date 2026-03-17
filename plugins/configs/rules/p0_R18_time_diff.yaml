@@ -1,0 +1,33 @@
+# p0_time_diff.yaml
+# 规则配置文件（V2）：P0 - 时间差异校验
+#
+# 功能：对比作业累计时长和任务总时长的差异：total_time/duration <0.9
+#(1-2 TOTAL TIME + ... +9-1 TOTAL TIME + OTHERS_TOTAL TIME  ) / (CYCLE END - CYCLE START) <0.9
+# 治理等级：P0 (Immediate)
+
+meta:
+  rule_id: R18_time_diff
+  severity: P0
+  description: "时间差异校验：对比作业累计时长和任务总时长的差异：total_time/duration <0.9"
+  owner: data-governance@example.com
+  created_at: "2026-03-13"
+
+target_entity: Cycle
+
+input:
+  entity_key: entity_cycle
+
+logic:
+  type: filter
+  filter_expr: "pl.col('total_time') / pl.col('duration') < 0.9"
+
+output:
+  key: rule_p0_time_diff_hits
+  stage: RESULT
+
+alert:
+  enabled: true
+  title: "[Cycle_log]作业时长可能有缺失"
+  trigger_id_field: cycle_id
+
+depends_on: []

@@ -5,7 +5,7 @@
 # 治理等级：P0 (Immediate)
 
 meta:
-  rule_id: rule_p0_box_count
+  rule_id: RC01_box_count
   severity: P0
   description: "箱数差异校验：识别Cycle log/Daily report/Checkpoint log/ngen箱数差异的数据"
   owner: data-governance@example.com
@@ -18,8 +18,8 @@ input:
 
 logic:
   type: filter
-  # filter_expr: "(pl.col('diff_box_count1') != 0) | (pl.col('diff_box_count2') != 0) | (pl.col('diff_box_count_ngen') != 0)"
-  filter_expr: "(pl.col('diff_box_count1') != 0) | (pl.col('diff_box_count2') != 0)"
+  filter_expr: "(pl.col('diff_box_count1') != 0) | (pl.col('diff_box_count2') != 0) | (pl.col('diff_box_count_ngen') != 0)"
+  # filter_expr: "(pl.col('diff_box_count1') != 0) | (pl.col('diff_box_count2') != 0)"
 
 output:
   key: rule_p0_box_count_hits

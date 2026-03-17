@@ -31,8 +31,16 @@ class Cycle:
     running_time: float     # 单圈作业时长（min）
     mileage: float          # 单圈作业里程（km）
     power_consumption: float          # 单圈电耗
-    ckp_3to4_total_time: float          # checkpoint 3to4段总时间
-    ckp_7to8_total_time: float          # checkpoint 7to8段总时间
+    ckp_1to2_total_time: float          # checkpoint 1to2段总时间(s)
+    ckp_2to3_total_time: float          # checkpoint 2to3段总时间(s)
+    ckp_3to4_total_time: float          # checkpoint 3to4段总时间(s)
+    ckp_4to5_total_time: float          # checkpoint 4to5段总时间(s)
+    ckp_5to6_total_time: float          # checkpoint 5to6段总时间(s)
+    ckp_6to7_total_time: float          # checkpoint 6to7段总时间(s)
+    ckp_7to8_total_time: float          # checkpoint 7to8段总时间(s)
+    ckp_8to9_total_time: float          # checkpoint 8to9段总时间(s)
+    ckp_others_total_time: float          # checkpoint others段总时间(s)
+    total_time: float          # 作业总时间(s)
     is_twin_lift: bool      # 是否双箱 (True/False)
     subtask_type_1: str          # 子任务1
     page_time_1_subtask: float          # 子任务1开始时间

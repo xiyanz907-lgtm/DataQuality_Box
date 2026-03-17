@@ -5,9 +5,9 @@
 # 治理等级：P0 (Immediate)
 
 meta:
-  rule_id: rule_p0_ckp_check
+  rule_id: R17_ckp_check
   severity: P0
-  description: "Checkpoint log部分阶段任务不可为空：3-4/7-8"
+  description: "Checkpoint log部分阶段任务不可为空：3-4/8-9"
   owner: data-governance@example.com
   created_at: "2026-02-28"
 
@@ -18,7 +18,7 @@ input:
 
 logic:
   type: filter
-  filter_expr: "pl.col('ckp_3to4_total_time').is_null() | pl.col('ckp_7to8_total_time').is_null()"
+  filter_expr: "pl.col('ckp_3to4_total_time').is_null() | pl.col('ckp_8to9_total_time').is_null()"
 
 output:
   key: rule_p0_ckp_check_hits
@@ -26,7 +26,7 @@ output:
 
 alert:
   enabled: true
-  title: "[Checkpoint log]有阶段任务为空：3-4/7-8"
+  title: "[Checkpoint log]有阶段任务为空：3-4/8-9"
   trigger_id_field: cycle_id
   content_template: "发现 {{ hit_count }} 条阶段任务为空数据，Cycle IDs: {{ trigger_ids_preview }}"
 

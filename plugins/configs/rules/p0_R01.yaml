@@ -5,7 +5,7 @@
 # 治理等级：P0 (Immediate)
 
 meta:
-  rule_id: rule_p0_mileage_check
+  rule_id: R01_mileage_check
   severity: P0
   description: "mileage字段校验：识别mileage异常数据"
   owner: data-governance@example.com

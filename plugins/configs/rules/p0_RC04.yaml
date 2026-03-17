@@ -1,0 +1,42 @@
+# 若AT状态码为 0，则该车辆当天必有Cycle记录
+meta:
+  rule_id: RC04_at_status_working_no_cycle
+  severity: P0
+  description: "作业模式有车无单：state=0 但当日无作业记录"
+  owner: data-governance@example.com
+  created_at: "2026-03-16"
+
+target_entity: Cycle
+
+input:
+  entity_keys:
+    left: "raw_at_status_working"
+    right: "entity_cycle"
+
+logic:
+  type: cross_entity
+  operation: anti_join
+
+  right_pre_agg:
+    group_by: ["vehicle_id", "shift_date"]
+    agg_exprs:
+      - name: "cycle_count"
+        expr: "col('cycle_id').count()"
+
+  join_on:
+    left: ["vehicle_id", "shift_date"]
+    right: ["vehicle_id", "shift_date"]
+
+output:
+  key: rule_p0_at_status_working_no_cycle_hits
+  stage: RESULT
+
+alert:
+  enabled: true
+  title: "[P0] 作业模式有车无单：state=0 但当日无作业记录"
+  trigger_id_field: "vehicle_id"
+  content_template: >
+    发现 {{ hit_count }} 条作业 AT 状态为作业模式(state=0)，但当日无任何作业记录，
+    Vehicle IDs: {{ trigger_ids_preview }}
+
+depends_on: []

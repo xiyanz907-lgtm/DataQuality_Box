@@ -228,7 +228,8 @@ class ContextAggregatorOperator(BaseGovernanceOperator):
                             severity="P0",
                             title=title,
                             content=content,
-                            trigger_cycle_ids=[str(t) for t in trigger_ids]
+                            trigger_cycle_ids=[str(t) for t in trigger_ids],
+                            trigger_id_field=trigger_id_field
                         )
                         
                         p0_count += 1
@@ -418,7 +419,8 @@ class ContextAggregatorOperator(BaseGovernanceOperator):
                                 severity="P2",
                                 title=title,
                                 content=content,
-                                trigger_cycle_ids=[str(t) for t in trigger_ids]
+                                trigger_cycle_ids=[str(t) for t in trigger_ids],
+                                trigger_id_field=trigger_id_field
                             )
                             
                             p2_count += 1

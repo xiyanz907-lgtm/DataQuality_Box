@@ -5,7 +5,7 @@
 # 治理等级：P0 (Immediate)
 
 meta:
-  rule_id: rule_p0_subtask_count
+  rule_id: R04_05_07_08_subtask_count
   severity: P0
   description: "子任务数量校验：识别子任务数量异常的数据"
   owner: data-governance@example.com

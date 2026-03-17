@@ -71,7 +71,8 @@ class AlertItem:
     content: str                    # 告警内容（已渲染）
     
     # 扩展字段
-    trigger_cycle_ids: List[str] = field(default_factory=list)  # 触发的 cycle_id 列表（用于追溯）
+    trigger_cycle_ids: List[str] = field(default_factory=list)  # 触发的 ID 列表（用于追溯）
+    trigger_id_field: str = "cycle_id"                          # 触发 ID 的来源字段名
     labels: Dict[str, str] = field(default_factory=dict)        # 业务标签（用于路由）
     created_at: str = ""            # 生成时间
 
@@ -282,7 +283,8 @@ class GovernanceContext:
     # ========================================================================
     
     def add_alert(self, rule_id: str, severity: str, title: str, content: str,
-                 trigger_cycle_ids: Optional[List[str]] = None, **kwargs) -> None:
+                 trigger_cycle_ids: Optional[List[str]] = None,
+                 trigger_id_field: str = "cycle_id", **kwargs) -> None:
         """
         添加告警
         
@@ -291,7 +293,8 @@ class GovernanceContext:
             severity: 严重等级
             title: 告警标题
             content: 告警内容
-            trigger_cycle_ids: 触发的 cycle_id 列表
+            trigger_cycle_ids: 触发的 ID 列表
+            trigger_id_field: 触发 ID 的来源字段名（如 cycle_id, vehicle_id）
             **kwargs: 其他扩展字段
         """
         alert = AlertItem(
@@ -300,6 +303,7 @@ class GovernanceContext:
             title=title,
             content=content,
             trigger_cycle_ids=trigger_cycle_ids or [],
+            trigger_id_field=trigger_id_field,
             labels=kwargs.get('labels', {}),
             created_at=datetime.utcnow().isoformat()
         )
