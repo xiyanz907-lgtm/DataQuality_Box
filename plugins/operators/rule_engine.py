@@ -30,7 +30,7 @@ from polars import col, lit, when
 from typing import Dict, Any, List, Optional
 
 from plugins.infra.operators import BaseGovernanceOperator
-from plugins.domian.context import GovernanceContext
+from plugins.domain.context import GovernanceContext
 
 
 class GenericRuleOperator(BaseGovernanceOperator):

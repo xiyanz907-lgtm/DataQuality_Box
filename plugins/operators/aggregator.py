@@ -20,7 +20,7 @@ from typing import Dict, Any, List, Optional
 from jinja2 import Template
 
 from plugins.infra.operators import BaseGovernanceOperator, get_multiple_upstream_contexts
-from plugins.domian.context import GovernanceContext
+from plugins.domain.context import GovernanceContext
 from plugins.orchestration.rule_scanner import RuleScanner
 
 

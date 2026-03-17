@@ -185,7 +185,7 @@ with DAG(
         3. 触发 Dataset，启动 DAG B
         """
         import logging
-        from plugins.domian.context import GovernanceContext
+        from plugins.domain.context import GovernanceContext
         
         logger = logging.getLogger(__name__)
         

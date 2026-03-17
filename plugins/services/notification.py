@@ -17,7 +17,7 @@ from jinja2 import Template
 from airflow.utils.email import send_email
 from airflow.utils.log.logging_mixin import LoggingMixin
 
-from plugins.domian.context import GovernanceContext, AlertItem
+from plugins.domain.context import GovernanceContext, AlertItem
 
 
 class NotificationService(LoggingMixin):

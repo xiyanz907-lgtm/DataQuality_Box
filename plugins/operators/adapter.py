@@ -13,7 +13,7 @@ from polars import col, lit, when
 from typing import Dict, Any
 
 from plugins.infra.operators import BaseGovernanceOperator
-from plugins.domian.context import GovernanceContext
+from plugins.domain.context import GovernanceContext
 
 
 class DomainAdapterOperator(BaseGovernanceOperator):

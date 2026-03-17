@@ -14,7 +14,7 @@ from datetime import datetime
 
 from airflow.utils.email import send_email
 from plugins.infra.operators import BaseGovernanceOperator
-from plugins.domian.context import GovernanceContext, AlertItem
+from plugins.domain.context import GovernanceContext, AlertItem
 
 
 class NotificationDispatcherOperator(BaseGovernanceOperator):

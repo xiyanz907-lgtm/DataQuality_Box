@@ -17,7 +17,7 @@ from typing import Optional, Dict, Any
 from airflow.models import BaseOperator
 from airflow.utils.decorators import apply_defaults
 
-from plugins.domian.context import GovernanceContext
+from plugins.domain.context import GovernanceContext
 from plugins.infra.config import Config
 from plugins.infra.io_strategy import IOStrategy
 

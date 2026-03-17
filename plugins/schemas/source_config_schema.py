@@ -91,15 +91,28 @@ class SourceMetaConfig(BaseModel):
 class ExtractionConfig(BaseModel):
     """单个数据提取任务配置"""
     id: str = Field(..., description="提取任务唯一标识")
-    source_type: Literal['mysql', 'postgresql', 'influxdb', 's3', 'minio']
+    source_type: Literal['mysql', 'postgresql', 'influxdb', 'http_api', 's3', 'minio']
     conn_id: str = Field(..., description="Airflow Connection ID")
-    query: Optional[str] = Field(None, description="SQL查询 (适用于数据库)")
+    query: Optional[str] = Field(None, description="SQL/Flux 查询模板")
     table: Optional[str] = Field(None, description="表名 (适用于数据库)")
-    bucket: Optional[str] = Field(None, description="桶名 (适用于对象存储)")
+    bucket: Optional[str] = Field(None, description="桶名 (适用于对象存储/InfluxDB)")
     key: Optional[str] = Field(None, description="对象键 (适用于对象存储)")
     output_key: str = Field(..., description="输出到Context的key")
     alt_key: Optional[str] = Field(None, description="备用键名 (可选)")
-    alt_key: Optional[str] = Field(None, description="备用key")
+
+    # ---- 漏斗式提取字段 ----
+    depends_on: Optional[List[str]] = Field(
+        None,
+        description="依赖的上游 extraction id 列表（声明执行顺序）"
+    )
+    input_ref: Optional[str] = Field(
+        None,
+        description="引用的上游 extraction output_key（用于模板渲染）"
+    )
+    iteration_mode: Literal['batch', 'per_row'] = Field(
+        'batch',
+        description="迭代模式: batch（上游整体作为 ref）/ per_row（逐行迭代）"
+    )
 
 
 class DefaultArgsConfig(BaseModel):

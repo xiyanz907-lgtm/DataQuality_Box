@@ -301,7 +301,7 @@ class DAGFactory:
             # Context 合并任务：将多个 Adapter 的 Context 合并为一个
             def merge_entity_contexts(adapter_task_ids_list: List[str], **context):
                 """合并多个 Adapter Context 的 data_registry"""
-                from plugins.domian.context import GovernanceContext
+                from plugins.domain.context import GovernanceContext
                 from plugins.infra.operators import get_multiple_upstream_contexts
                 
                 ti = context['task_instance']
@@ -430,7 +430,7 @@ class DAGFactory:
                 """将 P1 资产写入数据库队列，触发 DAG B"""
                 from datetime import datetime
                 from airflow.providers.mysql.hooks.mysql import MySqlHook
-                from plugins.domian.context import GovernanceContext
+                from plugins.domain.context import GovernanceContext
                 import json
                 
                 logger = context['task_instance'].log

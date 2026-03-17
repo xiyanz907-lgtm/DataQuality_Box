@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from airflow.providers.mysql.hooks.mysql import MySqlHook
 
 from plugins.infra.operators import BaseGovernanceOperator
-from plugins.domian.context import GovernanceContext
+from plugins.domain.context import GovernanceContext
 from plugins.orchestration.rule_scanner import RuleScanner
 
 

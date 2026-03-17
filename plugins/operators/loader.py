@@ -1,250 +1,406 @@
 """
 operators/loader.py
-通用数据加载器
+通用数据加载器 V2
 
 职责：
-- 从多个数据源（MySQL/InfluxDB）抽取数据
-- 渲染 SQL 模板（支持 Jinja）
+- 从多个数据源（MySQL / InfluxDB / HTTP API）抽取数据
+- 支持漏斗式提取（depends_on + input_ref）
+- 按拓扑排序执行 extraction 链
+- 支持 batch / per_row 两种迭代模式
+- 渲染查询模板（Jinja: Airflow 宏 + 上游数据引用）
 - 写入 Raw Parquet
-- 支持多表抽取
+
+V2 改进：
+- 引入 Extractor 抽象层（MySQL / InfluxDB / HTTP）
+- extraction 之间支持 depends_on 声明执行依赖
+- input_ref 引用上游 DataFrame 用于查询参数化
+- batch 模式: {{ ref.values('col') }} → SQL IN 子句
+- per_row 模式: {{ row.col }} → 逐行迭代查询
 """
 import polars as pl
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
+from collections import defaultdict, deque
 from jinja2 import Template
 
-from airflow.providers.mysql.hooks.mysql import MySqlHook
 from plugins.infra.operators import BaseGovernanceOperator
-from plugins.domian.context import GovernanceContext
+from plugins.domain.context import GovernanceContext
+from plugins.infra.extractors import get_extractor
+from plugins.infra.extractors.base import UpstreamRef
 
 
 class UniversalLoaderOperator(BaseGovernanceOperator):
     """
-    通用数据加载器
-    
-    配置示例 (configs/sources/datalog_mysql.yaml):
+    通用数据加载器 V2
+
+    支持扁平并行抽取（向后兼容）和漏斗式链式抽取。
+
+    配置示例 (扁平模式 - 向后兼容):
     ```yaml
-    source_meta:
-      id: "mysql_datalog_raw"
-      type: "mysql"
-      connection_id: "datalog_mysql_conn"
-    
     extractions:
-      - id: "summary"
-        output_key: "raw_summary"
-        sql: "SELECT * FROM cycle_section_summary WHERE shift_date = '{{ ds }}'"
-        alt_key: "Summary"
-      
-      - id: "subtarget"
-        output_key: "raw_subtarget"
-        sql: "SELECT * FROM subtarget_vehicle_cycle WHERE SHIFT_DATE = '{{ ds }}'"
-        alt_key: "Subtarget"
+      - id: "raw_cycle"
+        source_type: "mysql"
+        conn_id: "datalog_mysql_conn"
+        query: "SELECT * FROM cycle WHERE DATE(shift_date) = '{{ ds }}'"
+        output_key: "raw_cycle"
     ```
-    
-    使用示例:
-    ```python
-    loader = UniversalLoaderOperator(
-        task_id='load_raw_data',
-        config_path='configs/sources/datalog_mysql.yaml',
-        dag=dag
-    )
+
+    配置示例 (漏斗模式):
+    ```yaml
+    extractions:
+      - id: "raw_vehicles"
+        source_type: "mysql"
+        conn_id: "datalog_mysql_conn"
+        query: "SELECT DISTINCT vehicle_id FROM cycle WHERE DATE(shift_date) = '{{ ds }}'"
+        output_key: "raw_vehicles"
+
+      - id: "raw_telemetry"
+        source_type: "influxdb"
+        conn_id: "influxdb_conn"
+        depends_on: ["raw_vehicles"]
+        input_ref: "raw_vehicles"
+        iteration_mode: "per_row"
+        query: |
+          from(bucket: "telemetry")
+            |> range(start: {{ row.start_time }}, stop: {{ row.end_time }})
+            |> filter(fn: (r) => r.vehicle_id == "{{ row.vehicle_id }}")
+        output_key: "raw_telemetry"
     ```
     """
-    
+
     def execute_logic(self, ctx: GovernanceContext, context: Dict[str, Any]) -> None:
         """
-        抽取逻辑
-        
+        抽取逻辑 V2
+
         流程：
-        1. 遍历配置中的所有抽取任务
-        2. 对每个任务：清理 → 抽取 → 写入
-        3. 记录抽取统计
+        1. 对 extraction 列表做拓扑排序
+        2. 按层级顺序执行（同层无依赖的可并行，当前串行执行）
+        3. 有 input_ref 时，根据 iteration_mode 做模板渲染
         """
-        # 验证配置
         self._validate_config(['source_meta', 'extractions'])
-        
-        source_meta = self._config['source_meta']
+
         extractions = self._config.get('extractions', [])
-        
         if not extractions:
             self.log.warning("No extractions configured, skipping...")
             return
-        
+
         self.log.info(f"Starting extractions: {len(extractions)} tasks")
-        
-        # 执行每个抽取任务
-        for task in extractions:
-            self._execute_extraction_task(task, source_meta, ctx, context)
-        
+
+        extraction_map = {e['id']: e for e in extractions}
+        sorted_ids = self._topological_sort(extractions)
+
+        self.log.info(f"📋 Execution order: {sorted_ids}")
+
+        completed: Dict[str, pl.DataFrame] = {}
+
+        for ext_id in sorted_ids:
+            task = extraction_map[ext_id]
+            output_key = task['output_key']
+
+            upstream_df = self._resolve_upstream(task, completed, ctx)
+
+            if upstream_df is not None and upstream_df.height == 0:
+                self.log.warning(
+                    f"⏭️ [{ext_id}] upstream '{task.get('input_ref')}' is empty, "
+                    f"skipping extraction"
+                )
+                completed[output_key] = pl.DataFrame()
+                ctx.put_dataframe(key=output_key, df=pl.DataFrame(), stage="RAW",
+                                  alt_key=task.get('alt_key'))
+                continue
+
+            df = self._execute_extraction(task, ctx, context, upstream_df)
+            completed[output_key] = df
+
         self.log.info(f"✅ Completed {len(extractions)} extractions")
-    
-    def _execute_extraction_task(
-        self, 
-        task: Dict[str, Any], 
-        source_meta: Dict[str, Any],
-        ctx: GovernanceContext, 
-        context: Dict[str, Any]
-    ) -> None:
+
+    # ========================================================================
+    # 拓扑排序
+    # ========================================================================
+
+    def _topological_sort(self, extractions: List[Dict]) -> List[str]:
         """
-        执行单个抽取任务
-        
+        对 extraction 列表做拓扑排序
+
+        无 depends_on 的排在前面（Layer 0），有依赖的按依赖链排列。
+        存在环路时抛出 ValueError。
+
+        Returns:
+            排序后的 extraction id 列表
+        """
+        id_set = {e['id'] for e in extractions}
+        in_degree: Dict[str, int] = defaultdict(int)
+        adjacency: Dict[str, List[str]] = defaultdict(list)
+
+        for e in extractions:
+            ext_id = e['id']
+            in_degree.setdefault(ext_id, 0)
+            deps = e.get('depends_on') or []
+            for dep in deps:
+                if dep not in id_set:
+                    raise ValueError(
+                        f"Extraction '{ext_id}' depends on '{dep}', "
+                        f"which is not defined in extractions"
+                    )
+                adjacency[dep].append(ext_id)
+                in_degree[ext_id] += 1
+
+        queue = deque(eid for eid in id_set if in_degree[eid] == 0)
+        result = []
+
+        while queue:
+            current = queue.popleft()
+            result.append(current)
+            for neighbor in adjacency[current]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+
+        if len(result) != len(id_set):
+            raise ValueError(
+                f"Circular dependency detected in extractions! "
+                f"Sorted: {result}, All: {id_set}"
+            )
+
+        return result
+
+    # ========================================================================
+    # 上游数据解析
+    # ========================================================================
+
+    def _resolve_upstream(
+        self,
+        task: Dict[str, Any],
+        completed: Dict[str, pl.DataFrame],
+        ctx: GovernanceContext
+    ) -> Optional[pl.DataFrame]:
+        """
+        解析上游 DataFrame
+
+        优先级：
+        1. completed 字典（当前 Loader 内已完成的 extraction）
+        2. GovernanceContext（其他 Operator 写入的数据，如 entity 表）
+
+        Returns:
+            上游 DataFrame，无 input_ref 时返回 None
+        """
+        input_ref = task.get('input_ref')
+        if not input_ref:
+            return None
+
+        if input_ref in completed:
+            df = completed[input_ref]
+            self.log.info(
+                f"📎 [{task['id']}] resolved input_ref='{input_ref}' "
+                f"from completed ({df.height} rows)"
+            )
+            return df
+
+        try:
+            df = ctx.get_dataframe(key=input_ref, use_alt_key=True)
+            self.log.info(
+                f"📎 [{task['id']}] resolved input_ref='{input_ref}' "
+                f"from context ({df.height} rows)"
+            )
+            return df
+        except KeyError:
+            raise ValueError(
+                f"Extraction '{task['id']}' references input_ref='{input_ref}', "
+                f"but it was not found in completed extractions or context. "
+                f"Available: {list(completed.keys())}"
+            )
+
+    # ========================================================================
+    # 执行单个 extraction
+    # ========================================================================
+
+    def _execute_extraction(
+        self,
+        task: Dict[str, Any],
+        ctx: GovernanceContext,
+        context: Dict[str, Any],
+        upstream_df: Optional[pl.DataFrame]
+    ) -> pl.DataFrame:
+        """
+        执行单个 extraction（支持 batch / per_row 模式）
+
         Args:
-            task: 抽取任务配置
-            source_meta: 数据源元信息
+            task: extraction 任务配置
             ctx: 治理上下文
             context: Airflow context
+            upstream_df: 上游 DataFrame（可为 None）
+
+        Returns:
+            抽取结果 DataFrame
         """
         task_id = task.get('id', 'unknown')
         output_key = task['output_key']
-        
-        self.log.info(f"📥 Extracting [{task_id}] -> {output_key}")
-        
+        source_type = task.get('source_type', 'mysql')
+        conn_id = task.get('conn_id') or task.get('connection_id')
+        iteration_mode = task.get('iteration_mode', 'batch')
+
+        self.log.info(f"📥 Extracting [{task_id}] (type={source_type}, mode={iteration_mode})")
+
         try:
-            # 1. 清理旧数据
             self._clean_partition(ctx, stage="RAW", key=output_key)
-            
-            # 2. 抽取数据
-            df = self._extract_from_source(task, source_meta, context)
-            
-            # 3. 数据质量检查（可选）
+
+            extractor = get_extractor(source_type, conn_id, self.log)
+            query_template = task.get('query') or task.get('sql')
+            if not query_template:
+                raise ValueError(
+                    f"Missing 'query' or 'sql' in extraction '{task_id}'"
+                )
+
+            airflow_vars = self._build_airflow_vars(context)
+
+            if upstream_df is None:
+                rendered = self._render_template(query_template, airflow_vars)
+                df = extractor.extract_single(rendered, task)
+
+            elif iteration_mode == 'batch':
+                df = self._execute_batch(
+                    extractor, query_template, airflow_vars, upstream_df, task
+                )
+
+            elif iteration_mode == 'per_row':
+                df = self._execute_per_row(
+                    extractor, query_template, airflow_vars, upstream_df, task
+                )
+
+            else:
+                raise ValueError(f"Unknown iteration_mode: '{iteration_mode}'")
+
             if df.height == 0:
                 self.log.warning(f"⚠️ [{task_id}] extracted 0 rows")
-            
-            # 4. 写入 Context
+
             ctx.put_dataframe(
-                key=output_key,
-                df=df,
-                stage="RAW",
-                alt_key=task.get('alt_key')
+                key=output_key, df=df, stage="RAW", alt_key=task.get('alt_key')
             )
-            
+
             self.log.info(f"✅ [{task_id}] extracted {df.height} rows")
-            
+            return df
+
         except Exception as e:
             self.log.error(f"❌ [{task_id}] extraction failed: {e}")
             raise
-    
-    def _extract_from_source(
-        self, 
-        task: Dict[str, Any], 
-        source_meta: Dict[str, Any],
-        context: Dict[str, Any]
+
+    # ========================================================================
+    # Batch 模式
+    # ========================================================================
+
+    def _execute_batch(
+        self,
+        extractor,
+        query_template: str,
+        airflow_vars: dict,
+        upstream_df: pl.DataFrame,
+        task: dict
     ) -> pl.DataFrame:
         """
-        从数据源抽取数据
-        
-        Args:
-            task: 抽取任务配置
-            source_meta: 数据源元信息
-            context: Airflow context
-        
-        Returns:
-            Polars DataFrame
+        batch 模式：上游 DataFrame 整体作为 ref 传入模板
+
+        模板变量：
+            {{ ref.values('vehicle_id') }}  → 'V001','V002','V003'
+            {{ ref.count }}                 → 42
+            {{ ref.min('shift_date') }}     → '2026-01-01'
         """
-        # 1. 渲染 SQL（处理 Jinja 模板）
-        # 支持 'query' 和 'sql' 字段（兼容不同配置格式）
-        sql_template = task.get('query') or task.get('sql')
-        if not sql_template:
-            raise ValueError(f"Missing 'query' or 'sql' field in extraction config: {task.get('id')}")
-        
-        sql = self._render_sql(sql_template, context)
-        
-        self.log.info(f"Rendered SQL: {sql[:200]}...")  # 打印前200字符
-        
-        # 2. 根据数据源类型抽取
-        source_type = task.get('source_type', 'mysql')
-        
-        if source_type == 'mysql':
-            return self._extract_from_mysql(sql, task)
-        elif source_type == 'postgresql':
-            # 预留：PostgreSQL 抽取逻辑
-            raise NotImplementedError("PostgreSQL support not implemented yet")
-        elif source_type == 'influxdb':
-            # 预留：InfluxDB 抽取逻辑
-            raise NotImplementedError("InfluxDB support not implemented yet")
-        else:
-            raise ValueError(f"Unsupported source type: {source_type}")
-    
-    def _extract_from_mysql(
-        self, 
-        sql: str, 
-        task: Dict[str, Any]
+        ref = UpstreamRef(upstream_df)
+        rendered = self._render_template(query_template, airflow_vars, ref=ref)
+        self.log.info(f"  Batch query rendered ({upstream_df.height} upstream rows)")
+        return extractor.extract_single(rendered, task)
+
+    # ========================================================================
+    # Per-Row 模式
+    # ========================================================================
+
+    def _execute_per_row(
+        self,
+        extractor,
+        query_template: str,
+        airflow_vars: dict,
+        upstream_df: pl.DataFrame,
+        task: dict
     ) -> pl.DataFrame:
         """
-        从 MySQL 抽取数据（使用 Airflow Hook + Pandas 中转）
-        
-        策略：Hook → Pandas → Polars
-        优点：无外部依赖（connectorx），稳定可靠
-        
-        Args:
-            sql: 渲染后的 SQL
-            task: 抽取任务配置（包含 conn_id）
-        
-        Returns:
-            Polars DataFrame
+        per_row 模式：逐行迭代上游 DataFrame，每行生成一条查询
+
+        模板变量：
+            {{ row.vehicle_id }}   → 'V001'
+            {{ row.start_time }}   → '2026-01-01 08:00:00'
+
+        所有行的结果拼接为一个 DataFrame。
         """
-        # 支持 'conn_id' 和 'connection_id' 字段（兼容不同配置格式）
-        connection_id = task.get('conn_id') or task.get('connection_id')
-        if not connection_id:
-            raise ValueError(f"Missing 'conn_id' or 'connection_id' in extraction task: {task.get('id')}")
-        
-        try:
-            # 1. 使用 MySqlHook 获取 Pandas DataFrame
-            hook = MySqlHook(mysql_conn_id=connection_id)
-            self.log.info(f"🔌 Connecting to MySQL via Hook: {connection_id}")
-            
-            pandas_df = hook.get_pandas_df(sql=sql)
-            self.log.info(f"✅ Fetched {len(pandas_df)} rows from MySQL")
-            
-            # 2. 处理空结果集
-            if pandas_df.empty:
-                self.log.warning("⚠️ Query returned empty result")
-                return pl.from_pandas(pandas_df)
-            
-            # 3. 转换为 Polars DataFrame
-            polars_df = pl.from_pandas(pandas_df)
-            self.log.info(
-                f"✅ Converted to Polars: {polars_df.height} rows × "
-                f"{polars_df.width} columns"
-            )
-            
-            return polars_df
-            
-        except Exception as e:
-            self.log.error(f"❌ MySQL extraction failed: {str(e)}")
-            self.log.error(f"SQL preview: {sql[:500]}...")
-            raise
-    
-    def _render_sql(self, sql_template: str, context: Dict[str, Any]) -> str:
+        total = upstream_df.height
+        self.log.info(f"  Per-row iteration: {total} rows")
+
+        results: List[pl.DataFrame] = []
+        success_count = 0
+
+        for idx, row in enumerate(upstream_df.iter_rows(named=True)):
+            try:
+                rendered = self._render_template(query_template, airflow_vars, row=row)
+                row_df = extractor.extract_single(rendered, task)
+
+                if row_df.height > 0:
+                    results.append(row_df)
+                    success_count += 1
+
+                if (idx + 1) % 50 == 0:
+                    self.log.info(
+                        f"  Progress: {idx + 1}/{total} rows processed, "
+                        f"{success_count} with results"
+                    )
+
+            except Exception as e:
+                self.log.warning(f"  ⚠️ Row {idx} failed: {e}")
+                continue
+
+        self.log.info(
+            f"  Per-row completed: {success_count}/{total} rows returned data"
+        )
+
+        if results:
+            return pl.concat(results, how='diagonal_relaxed')
+        return pl.DataFrame()
+
+    # ========================================================================
+    # 模板渲染
+    # ========================================================================
+
+    def _render_template(
+        self,
+        template_str: str,
+        airflow_vars: dict,
+        ref: Optional[UpstreamRef] = None,
+        row: Optional[dict] = None
+    ) -> str:
         """
-        渲染 SQL 模板（支持 Jinja）
-        
-        Args:
-            sql_template: SQL 模板字符串
-            context: Airflow context（包含 ds, ts 等宏）
-        
-        Returns:
-            渲染后的 SQL 字符串
-        
-        示例:
-            模板: "SELECT * FROM table WHERE date = '{{ ds }}'"
-            渲染: "SELECT * FROM table WHERE date = '2026-01-26'"
+        渲染 Jinja 查询模板
+
+        变量优先级：
+        1. Airflow 宏（ds, ts, ...）— 始终可用
+        2. ref（UpstreamRef 对象）— batch 模式
+        3. row（dict）— per_row 模式
         """
-        template = Template(sql_template)
-        
-        # 提取常用宏
-        template_vars = {
-            'ds': context.get('ds'),                    # 2026-01-26
-            'ds_nodash': context.get('ds_nodash'),      # 20260126
-            'ts': context.get('ts'),                    # 2026-01-26T12:00:00+00:00
-            'ts_nodash': context.get('ts_nodash'),      # 20260126T120000
+        template = Template(template_str)
+
+        render_vars = dict(airflow_vars)
+        if ref is not None:
+            render_vars['ref'] = ref
+        if row is not None:
+            render_vars['row'] = row
+
+        return template.render(**render_vars)
+
+    def _build_airflow_vars(self, context: Dict[str, Any]) -> dict:
+        """提取 Airflow 宏变量"""
+        return {
+            'ds': context.get('ds'),
+            'ds_nodash': context.get('ds_nodash'),
+            'ts': context.get('ts'),
+            'ts_nodash': context.get('ts_nodash'),
             'execution_date': context.get('execution_date'),
             'prev_ds': context.get('prev_ds'),
             'next_ds': context.get('next_ds'),
             'yesterday_ds': context.get('yesterday_ds'),
             'tomorrow_ds': context.get('tomorrow_ds'),
         }
-        
-        # 渲染
-        rendered_sql = template.render(**template_vars)
-        
-        return rendered_sql

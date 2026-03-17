@@ -1,7 +1,9 @@
 import os
+import re
+import shutil
 import logging
 import pendulum
-from datetime import timedelta
+from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.models import XCom, Log
@@ -16,8 +18,29 @@ RETENTION_DAYS_XCOM = 7  # XCom 保留 7 天
 RETENTION_DAYS_LOGS = 30 # DB 日志保留 30 天
 RETENTION_DAYS_RULE_RESULTS = 90   # 规则明细保留 90 天
 RETENTION_DAYS_RUN_SUMMARY = 365   # 运行汇总保留 365 天
+RETENTION_DAYS_PARQUET = 7         # Parquet 中间数据保留 7 天
+GOVERNANCE_DATA_BASE = "/opt/airflow/data/governance"
 GOVERNANCE_REPORT_CONN_ID = "qa_mysql_conn"
 BATCH_SIZE = 5000       # 每次删除的批次大小，防止锁表
+
+# batch_id 日期解析模式（按优先级排列）
+_BATCH_DATE_PATTERNS = [
+    (re.compile(r"(\d{8}T\d{6})"), "%Y%m%dT%H%M%S"),
+    (re.compile(r"(\d{8}_\d{6})"), "%Y%m%d_%H%M%S"),
+    (re.compile(r"(\d{8})"), "%Y%m%d"),
+]
+
+
+def _parse_batch_date(batch_name: str):
+    """从 batch_id 目录名中提取日期，解析失败返回 None"""
+    for pattern, fmt in _BATCH_DATE_PATTERNS:
+        m = pattern.search(batch_name)
+        if m:
+            try:
+                return pendulum.instance(datetime.strptime(m.group(1), fmt))
+            except ValueError:
+                continue
+    return None
 
 default_args = {
     "owner": "box_admin",
@@ -130,5 +153,118 @@ with DAG(
         python_callable=_cleanup_governance_reports,
     )
 
-    cleanup_xcom_task >> cleanup_logs_task >> cleanup_governance_task
+    def _cleanup_parquet_data():
+        """清理过期的 Parquet 中间数据（按 batch_id 目录维度）"""
+        storage_type = os.environ.get("GOVERNANCE_STORAGE_TYPE", "local")
+        cutoff = pendulum.now("UTC").subtract(days=RETENTION_DAYS_PARQUET)
+
+        logging.info(
+            f"Cleaning Parquet batches older than {RETENTION_DAYS_PARQUET} days "
+            f"(before {cutoff.to_date_string()}), storage={storage_type}"
+        )
+
+        if storage_type == "local":
+            _cleanup_parquet_local(cutoff)
+        else:
+            _cleanup_parquet_minio(cutoff)
+
+    def _cleanup_parquet_local(cutoff):
+        if not os.path.exists(GOVERNANCE_DATA_BASE):
+            logging.info(f"Directory not found, skipping: {GOVERNANCE_DATA_BASE}")
+            return
+
+        deleted, skipped, freed = 0, 0, 0
+
+        for entry in sorted(os.listdir(GOVERNANCE_DATA_BASE)):
+            if not entry.startswith("batch_id="):
+                continue
+
+            batch_name = entry.split("=", 1)[1]
+            batch_path = os.path.join(GOVERNANCE_DATA_BASE, entry)
+            batch_date = _parse_batch_date(batch_name)
+
+            if batch_date is None:
+                logging.warning(f"Cannot parse date from '{batch_name}', skipping")
+                skipped += 1
+                continue
+
+            if batch_date < cutoff:
+                dir_size = sum(
+                    os.path.getsize(os.path.join(dp, f))
+                    for dp, _, fns in os.walk(batch_path) for f in fns
+                )
+                shutil.rmtree(batch_path)
+                freed += dir_size
+                deleted += 1
+                logging.info(
+                    f"  Deleted: {entry} "
+                    f"(date={batch_date.to_date_string()}, size={dir_size / 1024:.1f}KB)"
+                )
+            else:
+                logging.info(f"  Retained: {entry} (date={batch_date.to_date_string()})")
+
+        logging.info(
+            f"Parquet local cleanup done: deleted={deleted}, skipped={skipped}, "
+            f"freed={freed / 1024 / 1024:.2f}MB"
+        )
+
+    def _cleanup_parquet_minio(cutoff):
+        try:
+            import boto3
+            from botocore.exceptions import ClientError
+        except ImportError:
+            logging.warning("boto3 not available, skipping MinIO Parquet cleanup")
+            return
+
+        bucket = os.environ.get("MINIO_GOVERNANCE_BUCKET", "governance-data")
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=os.environ.get("MINIO_GOVERNANCE_ENDPOINT", "http://minio:9000"),
+            aws_access_key_id=os.environ.get("MINIO_GOVERNANCE_ACCESS_KEY", "minioadmin"),
+            aws_secret_access_key=os.environ.get("MINIO_GOVERNANCE_SECRET_KEY", "minioadmin"),
+            region_name=os.environ.get("MINIO_GOVERNANCE_REGION", "us-east-1"),
+        )
+
+        try:
+            paginator = s3.get_paginator("list_objects_v2")
+
+            batch_prefixes = set()
+            for page in paginator.paginate(Bucket=bucket, Prefix="batch_id=", Delimiter="/"):
+                for p in page.get("CommonPrefixes", []):
+                    batch_prefixes.add(p["Prefix"])
+
+            deleted = 0
+            for prefix in sorted(batch_prefixes):
+                batch_name = prefix.replace("batch_id=", "").rstrip("/")
+                batch_date = _parse_batch_date(batch_name)
+
+                if batch_date is None:
+                    logging.warning(f"Cannot parse date from MinIO prefix '{batch_name}', skipping")
+                    continue
+
+                if batch_date < cutoff:
+                    objects = []
+                    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                        objects.extend({"Key": o["Key"]} for o in page.get("Contents", []))
+
+                    for i in range(0, len(objects), 1000):
+                        s3.delete_objects(Bucket=bucket, Delete={"Objects": objects[i:i + 1000]})
+
+                    deleted += 1
+                    logging.info(
+                        f"  Deleted MinIO: {prefix} "
+                        f"({len(objects)} objects, date={batch_date.to_date_string()})"
+                    )
+
+            logging.info(f"Parquet MinIO cleanup done: deleted {deleted} batch(es)")
+
+        except ClientError as e:
+            logging.error(f"MinIO cleanup error: {e}")
+
+    cleanup_parquet_task = PythonOperator(
+        task_id="cleanup_parquet_data",
+        python_callable=_cleanup_parquet_data,
+    )
+
+    cleanup_xcom_task >> cleanup_logs_task >> cleanup_governance_task >> cleanup_parquet_task
 
