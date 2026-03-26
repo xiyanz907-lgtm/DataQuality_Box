@@ -319,10 +319,10 @@ with DAG(
             description='（选填）例如: 张工',
         ),
         'site': Param(
-            default='',
+            default=os.getenv('SITE_NAME', ''),
             type='string',
             title='现场名称',
-            description='（选填）例如: 宁波, 厦门, 天津',
+            description='（选填）例如: AQCT, NPCT, SPA',
         ),
     },
 ) as dag:

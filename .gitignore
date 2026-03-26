@@ -19,6 +19,11 @@ logs/
 data/
 incoming_files/*.csv
 
-# 4. IDE 配置
+# 4. Docker 镜像导出文件 (体积过大，不进入版本控制)
+*.tar
+*.tar.gz
+!deploy/deploy.sh
+
+# 5. IDE 配置
 .vscode/
 .idea/

@@ -114,6 +114,7 @@ extractions:
     source_type: "mysql"
     conn_id: "ngen_mysql_conn"
     query: |
+    
       SELECT
         TRACTOR_CYCLE_ID AS cycle_id,
         COUNT(*) AS box_ngen
@@ -142,7 +143,7 @@ extractions:
     source_type: "mysql"
     conn_id: "datalog_mysql_conn"
     query: |
-      SELECT vehicle_id, shift_date, start_time, end_time, state
+      SELECT vehicle_id, DATE(shift_date) AS shift_date, start_time, end_time, state
       FROM history_at_status
       WHERE DATE(shift_date) = '{{ ds }}'
     output_key: "raw_at_status"
@@ -153,7 +154,7 @@ extractions:
     conn_id: "datalog_mysql_conn"
     depend_on: ["raw_at_status"]
     query: |
-      SELECT DISTINCT vehicle_id, shift_date
+      SELECT DISTINCT vehicle_id, DATE(shift_date) AS shift_date
       FROM history_at_status
       WHERE DATE(shift_date) = '{{ ds }}'
       AND state = 0

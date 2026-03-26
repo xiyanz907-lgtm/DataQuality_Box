@@ -434,6 +434,15 @@ class GenericRuleOperator(BaseGovernanceOperator):
         left_on = join_on['left']
         right_on = join_on['right']
         
+        # 3.5 对齐 join key 类型（空 DataFrame 可能推断为错误类型）
+        for l_col, r_col in zip(left_on, right_on):
+            if l_col in left_df.columns and r_col in right_df.columns:
+                l_type = left_df[l_col].dtype
+                r_type = right_df[r_col].dtype
+                if l_type != r_type:
+                    self.log.info(f"  Type mismatch on join key: {l_col}({l_type}) vs {r_col}({r_type}), casting left to match right")
+                    left_df = left_df.with_columns(pl.col(l_col).cast(r_type))
+        
         # 4. 根据操作类型执行
         if operation == 'anti_join':
             hit_df = left_df.join(
