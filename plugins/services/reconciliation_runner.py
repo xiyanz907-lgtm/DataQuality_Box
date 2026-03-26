@@ -115,10 +115,11 @@ class ReconciliationRunner:
             if df_matched.height > 0:
                 updated_count = self._perform_updates(df_matched)
             
-            # [变更] 不再执行 Insert
-            # 如果需要记录 Orphaned nGen，可以在这里添加逻辑
+            # --- Step 5a: Insert orphaned nGen records ---
+            inserted_count = 0
             if df_orphaned.height > 0:
-                self.logger.warning(f"Found {df_orphaned.height} orphaned nGen records (no match in Cactus after loose search). Skipping insert.")
+                self.logger.info(f"Step 5a: Inserting {df_orphaned.height} orphaned nGen records into cnt_cycles...")
+                inserted_count = self._perform_inserts(df_orphaned, df_ngen_agg)
 
             # --- Step 6: Metrics & Reporting (In-Memory) ---
             self.logger.info("Step 6: Calculating Data Quality Metrics...")
@@ -128,9 +129,9 @@ class ReconciliationRunner:
             # --- Step 7: Audit ---
             return {
                 'updated': updated_count,
-                'inserted': 0, # Always 0 now
+                'inserted': inserted_count,
                 'status': 'SUCCESS',
-                'dq_report': dq_report # 传递给 DAG 进行汇总
+                'dq_report': dq_report
             }
 
         except Exception as e:
@@ -213,7 +214,8 @@ class ReconciliationRunner:
                 On_Chasis_Datetime, 
                 Off_Chasis_Datetime, 
                 Cntr_Id,
-                Cntr_Length_In_Feet
+                Cntr_Length_In_Feet,
+                Movement_Hot_Datetime
             FROM ngen
             WHERE TRIM(Tractor_No) IN ({vehicles_str})
             AND STR_TO_DATE(On_Chasis_Datetime, '%d/%m/%Y %H:%i:%s') >= STR_TO_DATE('{start_str}', '%d/%m/%Y %H:%i:%s')
@@ -422,4 +424,209 @@ class ReconciliationRunner:
             conn.close()
             
         return len(params)
+
+    def _compute_time_begin(self, df_orphaned: pl.DataFrame, df_all_ngen: pl.DataFrame) -> pl.DataFrame:
+        """
+        为 orphaned nGen 记录计算 _time_begin (移植自 NgenNewJobV2.handleTimeBegin)。
+
+        修正逻辑:
+        1. 候选值: min_hot_datetime (首选) 或 real_start_time (兜底)
+        2. 查找同车辆的上一圈 prevOffTime (前一个 cycle 的 real_end_time)
+        3. 修正条件 (任一满足则用 prevOffTime 替代):
+           - candidate >= real_start_time (on_chasis，说明 hot 时间不合理)
+           - candidate < prevOffTime (跑到上一圈去了)
+           - candidate > real_end_time (比结束时间还晚)
+        4. 若无 prevOffTime 且 candidate > real_end_time → 丢弃该记录
+        """
+        if df_orphaned.is_empty():
+            return df_orphaned.with_columns(pl.lit(None).cast(pl.Datetime(time_zone="UTC")).alias("computed_time_begin"))
+
+        # 1. 计算每个 cycle 的 prev_off_time (同车辆上一圈的结束时间)
+        df_sorted = df_all_ngen.sort(["vehicle_id", "real_end_time"])
+        df_with_prev = df_sorted.with_columns(
+            pl.col("real_end_time")
+              .shift(1)
+              .over("vehicle_id")
+              .alias("prev_off_time")
+        )
+        # 只取 cycle_id 和 prev_off_time 用于 join
+        df_prev_map = df_with_prev.select(["cycle_id", "prev_off_time"])
+
+        # 2. 将 prev_off_time join 到 orphaned 上
+        df = df_orphaned.join(df_prev_map, on="cycle_id", how="left")
+
+        # 3. 确定候选 time_begin
+        has_hot = pl.col("min_hot_datetime").is_not_null()
+        candidate_expr = pl.when(has_hot).then(pl.col("min_hot_datetime")).otherwise(pl.col("real_start_time"))
+
+        df = df.with_columns(candidate_expr.alias("candidate_begin"))
+
+        # 4. 应用修正条件
+        has_prev = pl.col("prev_off_time").is_not_null()
+        cand = pl.col("candidate_begin")
+        on_chasis = pl.col("real_start_time")
+        off_chasis = pl.col("real_end_time")
+        prev_off = pl.col("prev_off_time")
+
+        needs_correction = (
+            (cand >= on_chasis) |   # candidate 不早于 on_chasis → 不合理
+            (cand < prev_off) |     # candidate 跑到上一圈之前
+            (cand > off_chasis)     # candidate 比结束时间还晚
+        )
+
+        # 有 prevOffTime 时: 不合理则修正为 prevOffTime
+        # 无 prevOffTime 时: candidate > off_chasis 则标记为 null (丢弃)
+        corrected_expr = (
+            pl.when(has_prev & needs_correction)
+              .then(prev_off)
+            .when(has_prev.not_() & (cand > off_chasis))
+              .then(pl.lit(None).cast(pl.Datetime(time_zone="UTC")))
+            .otherwise(cand)
+        )
+
+        df = df.with_columns(corrected_expr.alias("computed_time_begin"))
+
+        # 5. 过滤掉无法计算 _time_begin 的记录
+        before_count = df.height
+        df = df.filter(pl.col("computed_time_begin").is_not_null())
+        dropped = before_count - df.height
+        if dropped > 0:
+            self.logger.warning(f"Time begin correction: dropped {dropped} records with invalid time_begin")
+
+        # 清理临时列
+        df = df.drop(["prev_off_time", "candidate_begin"])
+
+        return df
+
+    def _perform_inserts(self, df_orphaned: pl.DataFrame, df_all_ngen: pl.DataFrame) -> int:
+        """
+        将 orphaned nGen 记录插入到 cnt_cycles 表，补全 Cactus 数据完整性。
+
+        流程:
+        1. 调用 _compute_time_begin 计算 _time_begin (含时间修正)
+        2. 构造 INSERT 字段 (vehicleId, cycleId, _time_begin, _time, _time_end, cnt01-03, sync_status=3)
+        3. 去重: 查询 cnt_cycles 中已存在的 cycleId，排除重复
+        4. 批量 INSERT
+        """
+        if df_orphaned.is_empty():
+            self.logger.info("No orphaned nGen records to insert.")
+            return 0
+
+        # Step 1: 计算 time_begin (含修正)
+        df_with_time = self._compute_time_begin(df_orphaned, df_all_ngen)
+
+        if df_with_time.is_empty():
+            self.logger.warning("All orphaned records dropped after time_begin correction.")
+            return 0
+
+        self.logger.info(f"Preparing to insert {df_with_time.height} orphaned nGen records")
+
+        # Step 2: 转为 Pandas 处理 (便于逐行提取 list 元素和处理 null)
+        df_pd = df_with_time.to_pandas()
+
+        # 获取时区配置 (Cactus 表存储的是本地时间)
+        site_tz_str = os.getenv("SITE_TIMEZONE", "Asia/Hong_Kong")
+        local_tz = pendulum.timezone(site_tz_str)
+
+        def utc_to_local_str(dt_val):
+            """将 UTC datetime 转为本地时间字符串 (Cactus 存储格式)"""
+            if pd.isna(dt_val) or dt_val is None:
+                return None
+            dt = pendulum.instance(dt_val)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=pendulum.timezone("UTC"))
+            return dt.in_timezone(local_tz).format("YYYY-MM-DD HH:mm:ss")
+
+        def get_list_element(lst, idx):
+            if lst is None:
+                return None
+            try:
+                if len(lst) > idx:
+                    return lst[idx]
+            except (TypeError, AttributeError):
+                pass
+            return None
+
+        insert_params = []
+        for _, row in df_pd.iterrows():
+            time_begin = utc_to_local_str(row.get('computed_time_begin'))
+            time_end = utc_to_local_str(row.get('real_end_time'))
+
+            if not time_begin or not time_end:
+                continue
+
+            cycle_id = row.get('cycle_id')
+            if pd.isna(cycle_id):
+                continue
+
+            vehicle_id = row.get('vehicle_id')
+            ref_large = row.get('ref_cnt_large')
+            ref_small_list = row.get('ref_cnt_small_list')
+
+            cnt01 = get_list_element(ref_small_list, 0)
+            cnt02 = ref_large if (ref_large and not pd.isna(ref_large)) else None
+            cnt03 = get_list_element(ref_small_list, 1)
+
+            insert_params.append((
+                vehicle_id,         # vehicleId
+                int(cycle_id),      # cycleId
+                time_begin,         # _time_begin
+                time_end,           # _time (= _time_end)
+                time_end,           # _time_end
+                cnt01,              # cnt01
+                cnt02,              # cnt02
+                cnt03,              # cnt03
+                3,                  # sync_status = 3 (Synthetic Insert)
+            ))
+
+        if not insert_params:
+            self.logger.warning("No valid insert params after conversion.")
+            return 0
+
+        # Step 3: 去重 — 查询 cnt_cycles 中已存在的 cycleId
+        hook = MySqlHook(mysql_conn_id=self.cactus_conn_id)
+        cycle_ids = list({str(p[1]) for p in insert_params})
+        cycle_ids_str = ",".join(cycle_ids)
+
+        conn = hook.get_conn()
+        try:
+            cursor = conn.cursor()
+            existing_sql = f"SELECT DISTINCT cycleId FROM cnt_cycles WHERE cycleId IN ({cycle_ids_str})"
+            cursor.execute(existing_sql)
+            existing_cycle_ids = {str(r[0]) for r in cursor.fetchall()}
+
+            if existing_cycle_ids:
+                before_count = len(insert_params)
+                insert_params = [p for p in insert_params if str(p[1]) not in existing_cycle_ids]
+                self.logger.info(f"Dedup: {before_count} -> {len(insert_params)} (excluded {before_count - len(insert_params)} existing cycleIds)")
+
+            if not insert_params:
+                self.logger.info("All orphaned records already exist in cnt_cycles. Nothing to insert.")
+                cursor.close()
+                return 0
+
+            # Step 4: 批量 INSERT
+            insert_sql = """
+                INSERT INTO cnt_cycles (vehicleId, cycleId, _time_begin, _time, _time_end, cnt01, cnt02, cnt03, sync_status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+
+            batch_size = 5000
+            total_inserted = 0
+            for i in range(0, len(insert_params), batch_size):
+                batch = insert_params[i:i + batch_size]
+                cursor.executemany(insert_sql, batch)
+                conn.commit()
+                total_inserted += len(batch)
+
+            self.logger.info(f"Inserted {total_inserted} synthetic records into cnt_cycles (sync_status=3)")
+            cursor.close()
+
+        except Exception as e:
+            self.logger.error(f"DB Insert failed: {e}")
+            raise e
+        finally:
+            conn.close()
+
+        return total_inserted
 

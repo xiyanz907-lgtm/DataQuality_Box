@@ -33,7 +33,8 @@ class ReconciliationEngine:
             "real_end_time": pl.Datetime(time_zone="UTC"),
             "vehicle_id": pl.Utf8,
             "ref_cnt_large": pl.Utf8,
-            "ref_cnt_small_list": pl.List(pl.Utf8)
+            "ref_cnt_small_list": pl.List(pl.Utf8),
+            "min_hot_datetime": pl.Datetime(time_zone="UTC"),
         }
 
         # 防御性编程: 检查输入是否为空
@@ -51,6 +52,10 @@ class ReconciliationEngine:
             # 定义时间解析格式: "11/12/2025 21:58:59" -> %d/%m/%Y %H:%M:%S
             time_fmt = "%d/%m/%Y %H:%M:%S"
 
+            # 防御性补列: Movement_Hot_Datetime 可能不存在于旧版 nGen 提取中
+            if "Movement_Hot_Datetime" not in df_ngen.columns:
+                df_ngen = df_ngen.with_columns(pl.lit(None).cast(pl.Utf8).alias("Movement_Hot_Datetime"))
+
             df_clean = df_ngen.with_columns([
                 # Tractor_Cycle_Id 转为 Int64, 转换失败设为 null (strict=False)
                 pl.col("Tractor_Cycle_Id").cast(pl.Int64, strict=False),
@@ -67,6 +72,13 @@ class ReconciliationEngine:
                   .dt.replace_time_zone(timezone)
                   .dt.convert_time_zone("UTC")
                   .alias("end_time_parsed"),
+
+                # Movement_Hot_Datetime 解析 (用于 INSERT 时的 _time_begin 修正)
+                pl.col("Movement_Hot_Datetime")
+                  .str.strptime(pl.Datetime, format=time_fmt, strict=False)
+                  .dt.replace_time_zone(timezone)
+                  .dt.convert_time_zone("UTC")
+                  .alias("hot_datetime_parsed"),
                   
                 # Tractor_No 清洗 (Normalization)
                 # 提取数字 -> Int -> String -> zfill(2) -> "AT" + ...
@@ -136,7 +148,10 @@ class ReconciliationEngine:
                   )
                   .unique()
                   .sort()
-                  .alias("ref_cnt_small_list")
+                  .alias("ref_cnt_small_list"),
+
+                # min_hot_datetime: 最早的 Movement_Hot_Datetime (用于 INSERT 时计算 _time_begin)
+                pl.col("hot_datetime_parsed").min().alias("min_hot_datetime"),
             ])
 
             # 过滤掉 Key 为空的行 (如果 Tractor_Cycle_Id 转换失败)

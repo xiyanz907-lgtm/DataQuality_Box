@@ -94,9 +94,10 @@ with DAG(
         logger.info(f"Target Watermark for this run: {target_watermark_str}")
 
         # 5. 查询受影响的数据详情
-        # 筛选条件: last_modified 在窗口内 AND sync_status NOT IN (1, 4)
-        # sync_status=1 (Strict), sync_status=4 (Loose) 都是已完全匹配的状态，无需重试
-        # sync_status=0 (New), sync_status=2 (Target Only), sync_status=3 (Insert-Deprecated) 需要处理
+        # 筛选条件: last_modified 在窗口内 AND sync_status NOT IN (1, 3, 4)
+        # sync_status=1 (Strict Match), sync_status=4 (Loose Match) 已完全匹配，无需重试
+        # sync_status=3 (Synthetic Insert) 由 Reconciliation 自动插入的 nGen 补全记录，无需重试
+        # sync_status=0 (New), sync_status=2 (Target Only) 需要处理
         # 注意: 防止死循环 - 只有当 last_modified 真正更新时才处理。
         # MySQL 特性: 如果 update set sync_status=2 where sync_status=2，last_modified 不会变。
         
@@ -105,7 +106,7 @@ with DAG(
             FROM cnt_cycles 
             WHERE last_modified_timestamp > '{last_watermark_str}' 
             AND last_modified_timestamp <= '{target_watermark_str}'
-            AND (sync_status IS NULL OR sync_status NOT IN (1, 4))
+            AND (sync_status IS NULL OR sync_status NOT IN (1, 3, 4))
         """
         
         # 获取时间范围 (_time) 用于 Worker 拉取数据
