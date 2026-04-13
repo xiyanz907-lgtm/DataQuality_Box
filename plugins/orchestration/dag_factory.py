@@ -543,36 +543,155 @@ class DAGFactory:
             'poke_interval': sensor_config.poke_interval,
             'mode': sensor_config.mode,
         }
-        
+
+        # 如果配置了 timeout_alert，注入自定义 on_failure_callback 并禁用默认邮件
+        if getattr(sensor_config, 'timeout_alert', None) and sensor_config.timeout_alert.enabled:
+            alert_cfg = sensor_config.timeout_alert
+            common_args['on_failure_callback'] = self._build_sensor_timeout_callback(alert_cfg)
+            common_args['email_on_failure'] = False
+
         if sensor_config.type == 'SQL':
             return SqlSensor(
                 sql=sensor_config.sql,
                 conn_id=sensor_config.conn_id,
                 **common_args
             )
-        
+
         elif sensor_config.type == 'FILE':
             return FileSensor(
                 filepath=sensor_config.path,
                 fs_conn_id=sensor_config.fs_conn_id or 'fs_default',
                 **common_args
             )
-        
+
         elif sensor_config.type == 'TIME':
             return TimeDeltaSensor(
                 delta=timedelta(seconds=sensor_config.wait_seconds),
                 **common_args
             )
-        
+
         elif sensor_config.type == 'EXTERNAL_TASK':
             return ExternalTaskSensor(
                 external_dag_id=sensor_config.external_dag_id,
                 external_task_id=sensor_config.external_task_id,
                 **common_args
             )
-        
+
         else:
             raise ValueError(f"❌ Unsupported sensor type: {sensor_config.type}")
+
+    @staticmethod
+    def _build_sensor_timeout_callback(alert_cfg):
+        """
+        构建 Sensor 超时回调函数。
+
+        超时时查询指定表的最近更新时间，发送自定义告警邮件。
+        如果当天该表无数据更新，额外抄送现场项目经理。
+        """
+        # 闭包捕获配置值（避免序列化问题）
+        check_conn_id = alert_cfg.check_conn_id
+        check_table = alert_cfg.check_table
+        check_ts_field = alert_cfg.check_timestamp_field
+        no_update_cc_env = alert_cfg.no_update_cc_env
+
+        def _on_sensor_timeout(context):
+            from airflow.exceptions import AirflowSensorTimeout
+            from airflow.providers.mysql.hooks.mysql import MySqlHook
+            from airflow.utils.email import send_email
+
+            # 只处理 Sensor 超时，其他异常不干预
+            exception = context.get('exception')
+            if not isinstance(exception, AirflowSensorTimeout):
+                return
+
+            task_instance = context.get('task_instance')
+            dag_id = task_instance.dag_id if task_instance else 'unknown'
+            ds = context.get('ds', 'unknown')
+            log = task_instance.log if task_instance else logging.getLogger(__name__)
+
+            # 1. 查询目标表的最近更新时间
+            try:
+                hook = MySqlHook(mysql_conn_id=check_conn_id)
+                max_ts_row = hook.get_first(
+                    f"SELECT MAX({check_ts_field}) FROM {check_table}"
+                )
+                last_update_ts = max_ts_row[0] if max_ts_row and max_ts_row[0] else None
+            except Exception as e:
+                log.error(f"Failed to query {check_table}.{check_ts_field}: {e}")
+                last_update_ts = None
+
+            # 2. 判断当天是否有数据更新
+            has_today_data = False
+            try:
+                if last_update_ts is not None:
+                    today_count_row = hook.get_first(
+                        f"SELECT COUNT(*) FROM {check_table} "
+                        f"WHERE DATE({check_ts_field}) = CURDATE()"
+                    )
+                    has_today_data = (today_count_row[0] or 0) > 0
+            except Exception as e:
+                log.error(f"Failed to check today's data in {check_table}: {e}")
+
+            # 3. 构建邮件
+            site = os.getenv('SITE_NAME', '')
+            site_tag = f"[{site}] " if site else ""
+            last_update_display = str(last_update_ts) if last_update_ts else "无记录"
+            today_status = "有更新" if has_today_data else "当天无更新"
+
+            subject = f"{site_tag}Sensor 超时告警 - {dag_id} ({ds})"
+
+            body = f"""
+            <html><body>
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h3 style="color: #d35400;">Sensor 等待超时</h3>
+                <p>DAG <strong>{dag_id}</strong> 的数据就绪传感器在等待 <strong>{ds}</strong> 的数据时超时。</p>
+
+                <table style="border-collapse: collapse; width: 100%; margin: 16px 0;">
+                    <tr style="background: #f8f9fa;">
+                        <td style="padding: 8px 12px; border: 1px solid #dee2e6; font-weight: bold;">
+                            {check_table} 最近更新时间
+                        </td>
+                        <td style="padding: 8px 12px; border: 1px solid #dee2e6;">
+                            {last_update_display}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 12px; border: 1px solid #dee2e6; font-weight: bold;">
+                            当天数据状态
+                        </td>
+                        <td style="padding: 8px 12px; border: 1px solid #dee2e6; color: {'#27ae60' if has_today_data else '#e74c3c'};">
+                            {today_status}
+                        </td>
+                    </tr>
+                </table>
+
+                {"<p style='color: #e74c3c; font-weight: bold;'>当天无数据更新，请确认是当天没有作业还是数据未上传。</p>" if not has_today_data else ""}
+
+                <hr style="border: none; border-top: 1px solid #eee; margin: 16px 0;"/>
+                <p style="color: #999; font-size: 12px;">Generated by {dag_id} / data_ready_sensor</p>
+            </div>
+            </body></html>
+            """
+
+            # 4. 确定收件人和抄送
+            email_to = os.getenv('ALERT_EMAIL_TO', 'xiyan.zhou@westwell-lab.com')
+            email_to = [e.strip() for e in email_to.split(',')]
+
+            email_cc = None
+            if not has_today_data and no_update_cc_env:
+                cc_addr = os.getenv(no_update_cc_env, '')
+                if cc_addr:
+                    email_cc = [e.strip() for e in cc_addr.split(',')]
+
+            # 5. 发送
+            try:
+                send_email(to=email_to, subject=subject, html_content=body, cc=email_cc)
+                cc_info = f", CC: {email_cc}" if email_cc else ""
+                log.info(f"Sensor timeout alert sent to {email_to}{cc_info}")
+            except Exception as e:
+                log.error(f"Failed to send sensor timeout alert: {e}")
+
+        return _on_sensor_timeout
 
 
 # ============= DAG 注册入口 =============

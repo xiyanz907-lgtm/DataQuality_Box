@@ -14,7 +14,7 @@ source_meta:
 # 调度策略
 scheduling:
   trigger_mode: "CRON"
-  cron_expression: "0 8 * * *"  # 每天上午八点（UTC时间）检查前一天的数据
+  cron_expression: "30 8 * * *"  # 每天上午八点半（UTC时间）检查前一天的数据
   
   # 可选：前置传感器，确保上游数据就绪
   sensor:
@@ -28,6 +28,12 @@ scheduling:
     timeout: 1800      # 30分钟超时
     poke_interval: 300  # 每5分钟检查一次
     mode: "reschedule"  # 释放worker slot
+    timeout_alert:
+      enabled: true
+      check_conn_id: "ngen_mysql_conn"
+      check_table: "ngen"
+      check_timestamp_field: "last_modified_timestamp"
+      no_update_cc_env: "SITE_MANAGER_EMAIL"
 
 # 数据提取配置（支持多数据源）
 extractions:
