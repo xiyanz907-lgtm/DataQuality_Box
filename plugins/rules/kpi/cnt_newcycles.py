@@ -2,7 +2,7 @@ import os
 import polars as pl
 from dq_lib.consistency import ConsistencyChecks
 
-# 迁移自 rules/single/cnt_newcycles.py，保持与 cnt_cycles 规则结构一致：
+# 迁移自 rules/single/cnt_newcycles.py，保持与 cnt_cycles_check 规则结构一致：
 # - 提供 CONFIG 让 LogicRunner 识别为“单表模式”
 # - get_logic_rules 直接接受已清洗的 df_self，执行链路连续性检查
 

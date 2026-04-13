@@ -53,9 +53,9 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# 安全加载环境变量：将未加引号的值自动加引号，防止含空格/特殊字符的值（如 JWT Token）被 bash 误解释
+# 安全加载环境变量：用单引号包裹值，防止 $、!、`` 等特殊字符被 bash 展开
 set -a
-source <(grep -v '^\s*#' .env | sed 's/\r$//' | sed '/^$/d' | sed 's/=\(.*\)/="\1"/')
+source <(grep -v '^\s*#' .env | sed 's/\r$//' | sed '/^$/d' | sed "s/=\(.*\)/='\1'/")
 set +a
 echo -e "${GREEN}✓ 配置文件检查完成${NC}"
 
@@ -69,7 +69,8 @@ echo -e "${YELLOW}[5/6]${NC} 设置目录权限..."
 if ! grep -q "^AIRFLOW_UID=" .env; then
     echo "AIRFLOW_UID=$(id -u)" >> .env
 fi
-sudo chown -R $(id -u):0 ../dags ../logs ../plugins
+chown -R $(id -u):0 ../dags ../logs ../plugins 2>/dev/null || \
+    echo -e "${YELLOW}⚠ chown 权限不足，跳过（如果目录已属于当前用户则无影响）${NC}"
 echo -e "${GREEN}✓ 权限设置完成${NC}"
 
 # 停止旧服务
@@ -101,12 +102,18 @@ for i in {1..30}; do
     fi
 done
 
+# 动态获取主机 IP 和映射端口
+HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -z "$HOST_IP" ] && HOST_IP="localhost"
+HOST_PORT=$(docker compose port airflow 8080 2>/dev/null | cut -d: -f2 || echo "8081")
+[ -z "$HOST_PORT" ] && HOST_PORT="8081"
+
 echo ""
 echo "=========================================="
 echo -e "${GREEN}✅ 部署完成！${NC}"
 echo "=========================================="
 echo ""
-echo "📊 Airflow Web UI:  http://localhost:8081"
+echo "📊 Airflow Web UI:  http://${HOST_IP}:${HOST_PORT}"
 echo "👤 用户名:          ${AIRFLOW_ADMIN_USER}"
 echo "🔑 密码:            ${AIRFLOW_ADMIN_PASSWORD}"
 echo ""

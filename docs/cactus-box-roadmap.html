@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cactus-Box: From Airflow to Benchmark</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e17;
+  --surface: #111827;
+  --surface2: #1a2236;
+  --border: #2a3654;
+  --text: #e2e8f0;
+  --text-dim: #8899b4;
+  --accent-green: #34d399;
+  --accent-green-dim: rgba(52,211,153,0.12);
+  --accent-amber: #fbbf24;
+  --accent-amber-dim: rgba(251,191,36,0.12);
+  --accent-red: #f87171;
+  --accent-red-dim: rgba(248,113,113,0.08);
+  --accent-blue: #60a5fa;
+  --accent-purple: #a78bfa;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background: var(--bg); color: var(--text); font-family: 'IBM Plex Sans', sans-serif; padding: 40px 48px; max-width: 1400px; margin: 0 auto; }
+
+h1 { font-family: 'DM Serif Display', serif; font-size: 2.2rem; margin-bottom: 8px; letter-spacing: -0.02em; }
+.subtitle { color: var(--text-dim); font-size: 0.95rem; margin-bottom: 48px; font-weight: 300; }
+
+/* Progress Bar */
+.status-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 16px 0 8px; gap: 2px; }
+.seg { border-radius: 3px; }
+.seg.done-seg { background: var(--accent-green); flex: 5; }
+.seg.current-seg { background: var(--accent-amber); flex: 1; }
+.seg.future-seg { background: rgba(248,113,113,0.3); flex: 4; }
+.status-labels { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--text-dim); margin-bottom: 48px; }
+
+/* Pipeline */
+.pipeline { display: flex; gap: 0; align-items: stretch; margin-bottom: 56px; }
+@media (max-width: 900px) { .pipeline { flex-direction: column; gap: 8px; } }
+
+.phase { flex: 1; padding: 24px 20px; border: 1px solid var(--border); position: relative; }
+.phase:first-child { border-radius: 12px 0 0 12px; }
+.phase:last-child { border-radius: 0 12px 12px 0; }
+.phase + .phase { border-left: none; }
+
+.phase.done { background: var(--accent-green-dim); border-color: rgba(52,211,153,0.3); }
+.phase.current { background: var(--accent-amber-dim); border-color: rgba(251,191,36,0.4); }
+.phase.future { background: var(--accent-red-dim); border-color: rgba(248,113,113,0.15); }
+
+.phase-badge { display: inline-block; font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; padding: 3px 10px; border-radius: 20px; margin-bottom: 12px; }
+.done .phase-badge { background: var(--accent-green); color: #042f2e; }
+.current .phase-badge { background: var(--accent-amber); color: #451a03; }
+.future .phase-badge { background: rgba(248,113,113,0.25); color: var(--accent-red); border: 1px solid rgba(248,113,113,0.3); }
+
+.phase h3 { font-family: 'DM Serif Display', serif; font-size: 1.1rem; margin-bottom: 6px; }
+.phase p { font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; margin-bottom: 14px; }
+.phase ul { list-style: none; font-size: 0.78rem; }
+.phase ul li { padding: 4px 0; padding-left: 16px; position: relative; color: var(--text-dim); }
+.phase ul li::before { content: ''; position: absolute; left: 0; top: 10px; width: 6px; height: 6px; border-radius: 50%; }
+.done ul li::before { background: var(--accent-green); }
+.current ul li::before { background: var(--accent-amber); }
+.future ul li::before { background: var(--accent-red); opacity: 0.5; }
+
+.arrow { position: absolute; right: -13px; top: 50%; transform: translateY(-50%); z-index: 2; width: 24px; height: 24px; }
+.arrow svg { width: 20px; height: 20px; }
+
+/* Section titles */
+.section-title { font-family: 'DM Serif Display', serif; font-size: 1.5rem; margin: 48px 0 24px; padding-left: 16px; border-left: 3px solid var(--accent-amber); }
+
+/* Three hard problems */
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 40px; }
+@media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; transition: transform 0.2s; }
+.card:hover { transform: translateY(-2px); }
+.card .num { font-family: 'DM Serif Display', serif; font-size: 2rem; margin-bottom: 4px; }
+.card h4 { font-size: 0.95rem; font-weight: 600; margin-bottom: 8px; }
+.card p { font-size: 0.8rem; color: var(--text-dim); line-height: 1.6; }
+.tag { display: inline-block; font-size: 0.65rem; font-weight: 500; padding: 2px 8px; border-radius: 4px; margin-top: 12px; font-family: 'IBM Plex Mono', monospace; }
+.tag.hard { background: rgba(248,113,113,0.15); color: var(--accent-red); }
+.tag.medium { background: rgba(251,191,36,0.15); color: var(--accent-amber); }
+.tag.easy { background: rgba(52,211,153,0.15); color: var(--accent-green); }
+
+/* Key questions */
+.question-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 40px; }
+@media (max-width: 900px) { .question-grid { grid-template-columns: 1fr; } }
+
+.question { background: var(--surface2); border-radius: 12px; padding: 24px; border-left: 3px solid var(--accent-blue); }
+.question h4 { font-size: 0.9rem; color: var(--accent-blue); margin-bottom: 10px; }
+.question p { font-size: 0.82rem; color: var(--text-dim); line-height: 1.65; }
+.question em { color: var(--accent-amber); font-style: normal; font-weight: 500; }
+
+/* Roadmap */
+.roadmap { margin-bottom: 40px; }
+.roadmap-item { display: flex; gap: 20px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.roadmap-item:last-child { border-bottom: none; }
+.roadmap-phase { font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; font-weight: 500; min-width: 90px; padding-top: 2px; }
+.rp-now { color: var(--accent-amber); }
+.rp-next { color: var(--accent-blue); }
+.rp-later { color: var(--accent-purple); }
+.roadmap-content h4 { font-size: 0.9rem; margin-bottom: 4px; }
+.roadmap-content p { font-size: 0.78rem; color: var(--text-dim); line-height: 1.55; }
+
+/* Data flow diagram */
+.flow-section { margin: 48px 0; }
+.flow-diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px; overflow-x: auto; }
+.flow-row { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: nowrap; min-width: 900px; margin-bottom: 12px; }
+.flow-row:last-child { margin-bottom: 0; }
+.flow-node { padding: 10px 16px; border-radius: 8px; font-size: 0.75rem; font-weight: 500; text-align: center; white-space: nowrap; min-width: 110px; }
+.flow-node.done-node { background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.35); color: var(--accent-green); }
+.flow-node.gap-node { background: rgba(251,191,36,0.15); border: 1px dashed rgba(251,191,36,0.5); color: var(--accent-amber); }
+.flow-node.todo-node { background: rgba(248,113,113,0.1); border: 1px dashed rgba(248,113,113,0.3); color: var(--accent-red); }
+.flow-node.ext-node { background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.3); color: var(--accent-blue); }
+.flow-arrow { color: var(--text-dim); font-size: 1.2rem; }
+.flow-label { font-size: 0.6rem; color: var(--text-dim); text-align: center; margin-top: -8px; margin-bottom: 8px; letter-spacing: 0.05em; }
+.flow-sublabel { display: block; font-size: 0.6rem; color: var(--text-dim); font-weight: 300; margin-top: 2px; }
+
+.legend { display: flex; gap: 24px; margin-top: 16px; justify-content: center; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.7rem; color: var(--text-dim); }
+.legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+.legend-dot.ld-done { background: rgba(52,211,153,0.4); border: 1px solid var(--accent-green); }
+.legend-dot.ld-gap { background: rgba(251,191,36,0.3); border: 1px dashed var(--accent-amber); }
+.legend-dot.ld-todo { background: rgba(248,113,113,0.15); border: 1px dashed var(--accent-red); }
+.legend-dot.ld-ext { background: rgba(96,165,250,0.15); border: 1px solid var(--accent-blue); }
+
+footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--border); font-size: 0.72rem; color: var(--text-dim); text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>Cactus-Box: Where Are We?</h1>
+<p class="subtitle">From data quality testing to algorithm benchmarking &mdash; a strategic overview</p>
+
+<div class="status-bar">
+  <div class="seg done-seg"></div>
+  <div class="seg current-seg"></div>
+  <div class="seg future-seg"></div>
+</div>
+<div class="status-labels">
+  <span>Airflow DQ Platform (Done)</span>
+  <span>&larr; You are here &rarr;</span>
+  <span>Benchmark Platform (Todo)</span>
+</div>
+
+<!-- ===== 5-Phase Pipeline ===== -->
+<div class="pipeline">
+  <div class="phase done">
+    <span class="phase-badge">Done</span>
+    <h3>1. Data Discovery</h3>
+    <p>Identify anomalies from production data</p>
+    <ul>
+      <li>18 validation rules (R01-R18, RC01-RC04)</li>
+      <li>P0/P1/P2 severity classification</li>
+      <li>Automated email alerts</li>
+      <li>Manual corner case intake</li>
+      <li>Test results persisted to MySQL</li>
+    </ul>
+    <div class="arrow"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="#4a5568" stroke-width="2"/></svg></div>
+  </div>
+
+  <div class="phase done">
+    <span class="phase-badge">Done</span>
+    <h3>2. Asset Packaging</h3>
+    <p>Package raw data for corner cases</p>
+    <ul>
+      <li>DAG B async packing pipeline</li>
+      <li>InfluxDB raw data extraction</li>
+      <li>MinIO storage at site</li>
+      <li>Zombie task recovery</li>
+      <li>Status: IDENTIFIED &rarr; PACKAGED</li>
+    </ul>
+    <div class="arrow"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="#4a5568" stroke-width="2"/></svg></div>
+  </div>
+
+  <div class="phase current">
+    <span class="phase-badge">Current Gap</span>
+    <h3>3. Data Transport</h3>
+    <p>Move packed data from site to HQ</p>
+    <ul>
+      <li>Ops manual transfer from MinIO</li>
+      <li>Local storage organization</li>
+      <li>Catalog status sync</li>
+    </ul>
+    <div class="arrow"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="#fbbf24" stroke-width="2"/></svg></div>
+  </div>
+
+  <div class="phase future">
+    <span class="phase-badge">Todo</span>
+    <h3>4. Benchmark</h3>
+    <p>Run algorithms against corner case data</p>
+    <ul>
+      <li>Test case standardization</li>
+      <li>Algorithm service invocation</li>
+      <li>Ground truth comparison</li>
+      <li>Regression detection</li>
+    </ul>
+    <div class="arrow"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="#4a5568" stroke-width="2"/></svg></div>
+  </div>
+
+  <div class="phase future">
+    <span class="phase-badge">Todo</span>
+    <h3>5. Value Delivery</h3>
+    <p>Reports, training data, continuous improvement</p>
+    <ul>
+      <li>Performance dashboard</li>
+      <li>Version comparison reports</li>
+      <li>Training dataset curation</li>
+      <li>Active learning loop</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ===== Data Flow Diagram ===== -->
+<div class="flow-section">
+  <h2 class="section-title">End-to-End Data Flow / 端到端数据流</h2>
+  <div class="flow-diagram">
+    <div class="flow-row">
+      <div class="flow-node done-node">
+        Cactus Edge
+        <span class="flow-sublabel">Raw Data (InfluxDB)</span>
+      </div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-node done-node">
+        DAG A: Governance
+        <span class="flow-sublabel">Rule Engine (18 rules)</span>
+      </div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-node done-node">
+        Corner Case<br>Identified
+        <span class="flow-sublabel">auto_test_case_catalog</span>
+      </div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-node done-node">
+        DAG B: Packing
+        <span class="flow-sublabel">async API + polling</span>
+      </div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-node done-node">
+        MinIO (Site)
+        <span class="flow-sublabel">batchname.tar.gz</span>
+      </div>
+    </div>
+
+    <div class="flow-label">&darr;&darr;&darr; &nbsp;&nbsp; OPS MANUAL TRANSFER &nbsp;&nbsp; &darr;&darr;&darr;</div>
+
+    <div class="flow-row">
+      <div class="flow-node gap-node">
+        Local Storage
+        <span class="flow-sublabel">tar.gz landed at HQ</span>
+      </div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-node todo-node">
+        Data Transformer
+        <span class="flow-sublabel">tar.gz &rarr; std input</span>
+      </div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-node ext-node">
+        Algorithm Service
+        <span class="flow-sublabel">Dagster / Java API</span>
+      </div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-node todo-node">
+        Result Comparator
+        <span class="flow-sublabel">output vs ground truth</span>
+      </div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-node todo-node">
+        Report & Dashboard
+        <span class="flow-sublabel">regression / trends</span>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot ld-done"></div> Already Built</div>
+      <div class="legend-item"><div class="legend-dot ld-gap"></div> Current Gap</div>
+      <div class="legend-item"><div class="legend-dot ld-todo"></div> To Be Built</div>
+      <div class="legend-item"><div class="legend-dot ld-ext"></div> External Service</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Three Hard Problems ===== -->
+<h2 class="section-title">The Three Hard Problems / 三个核心难题</h2>
+
+<div class="cards">
+  <div class="card">
+    <div class="num" style="color: var(--accent-red)">01</div>
+    <h4>Ground Truth Problem / 真值问题</h4>
+    <p>Before you can benchmark, you need to define "correct". For corner cases, the algorithm <strong>already failed</strong> &mdash; so what IS the correct answer? Who labels it? How do you maintain it over time?</p>
+    <p style="margin-top:8px">做 Benchmark 的前提是知道"正确答案"。但 corner case 本身就是算法出错的场景 &mdash; 那正确答案谁来定义？怎么标注？怎么维护？</p>
+    <span class="tag hard">Hardest &mdash; solve first / 最难 &mdash; 优先解决</span>
+  </div>
+  <div class="card">
+    <div class="num" style="color: var(--accent-amber)">02</div>
+    <h4>Standardization Problem / 标准化问题</h4>
+    <p>Raw InfluxDB data (tar.gz) is not directly consumable by algorithms. You need a transformation layer that converts raw sensor data into the exact input format each algorithm service expects.</p>
+    <p style="margin-top:8px">InfluxDB 原始时序数据（tar.gz）不能直接喂给算法。需要一个转换层，把传感器数据转成算法服务期望的输入格式。</p>
+    <span class="tag medium">Medium &mdash; engineering work / 中等 &mdash; 工程量</span>
+  </div>
+  <div class="card">
+    <div class="num" style="color: var(--accent-blue)">03</div>
+    <h4>Orchestration Problem / 编排问题</h4>
+    <p>Running benchmarks means coordinating: data prep, service calls, result collection, comparison, and reporting. Across multiple algorithm versions, multiple test cases, potentially in parallel.</p>
+    <p style="margin-top:8px">跑 Benchmark 需要协调：数据准备、服务调用、结果收集、比对、报告。跨多个算法版本、多个用例，可能并行执行。</p>
+    <span class="tag easy">Tractable &mdash; you've done this / 可控 &mdash; 你有经验</span>
+  </div>
+</div>
+
+<!-- ===== Key Questions ===== -->
+<h2 class="section-title">Key Questions Before You Build / 动手前的关键问题</h2>
+
+<div class="question-grid">
+  <div class="question">
+    <h4>Q1: Who defines ground truth? / 谁定义真值？</h4>
+    <p>Options: <em>Human annotation</em> (domain experts label correct output), <em>Simulation replay</em> (use simulator output as reference), <em>Golden version</em> (freeze a "known good" algorithm as baseline), or <em>Hybrid</em> (auto-baseline + human review for edge cases).</p>
+  </div>
+  <div class="question">
+    <h4>Q2: What gets compared? / 比较什么？</h4>
+    <p>Algorithm output could be: <em>trajectories</em>, <em>control signals</em>, <em>object detections</em>, <em>planning decisions</em>. Each needs different comparison metrics (L2 distance, IoU, decision match rate, etc.).</p>
+  </div>
+  <div class="question">
+    <h4>Q3: Where does Benchmark run? / 在哪跑？</h4>
+    <p>Your diagram shows <em>Dagster/Java</em>. Is this existing infra? Airflow is at the <em>site</em>, Benchmark is at <em>HQ</em> &mdash; different environments. Do you reuse Airflow or build something separate?</p>
+  </div>
+  <div class="question">
+    <h4>Q4: What's the MVP? / 最小闭环是什么？</h4>
+    <p>Simplest useful benchmark: <em>take 10 corner cases &rarr; run through algorithm &rarr; human reviews output &rarr; marks pass/fail</em>. No automation needed at first. Validate the workflow before building infra.</p>
+  </div>
+</div>
+
+<!-- ===== Roadmap ===== -->
+<h2 class="section-title">Suggested Roadmap / 建议路线图</h2>
+
+<div class="roadmap">
+  <div class="roadmap-item">
+    <div class="roadmap-phase rp-now">Phase 0<br><span style="font-size:0.6rem;opacity:0.7">1-2 weeks</span></div>
+    <div class="roadmap-content">
+      <h4>Close the Loop Manually / 手动走通全流程</h4>
+      <p>Don't build anything yet. Take 5-10 packaged corner cases, manually run through the algorithm, manually compare results. The goal: understand the <strong>actual workflow</strong> before automating it. Document what inputs the algorithm needs, what outputs it produces, and how you'd judge success.</p>
+      <p style="margin-top:6px">先别写代码。拿 5-10 个已打包的 corner case，手动跑一遍算法，手动比对结果。目标：在自动化之前，搞清楚真实工作流。记录算法需要什么输入、产出什么输出、怎么判断成功。</p>
+    </div>
+  </div>
+  <div class="roadmap-item">
+    <div class="roadmap-phase rp-next">Phase 1<br><span style="font-size:0.6rem;opacity:0.7">2-3 weeks</span></div>
+    <div class="roadmap-content">
+      <h4>Ground Truth + Catalog / 真值管理 + 用例目录</h4>
+      <p>Extend auto_test_case_catalog with ground_truth_json. Build a simple annotation tool or workflow (even a spreadsheet works). Evolve process_status: PACKAGED &rarr; LABELED &rarr; BENCHMARKED. This is the foundation everything else builds on.</p>
+    </div>
+  </div>
+  <div class="roadmap-item">
+    <div class="roadmap-phase rp-next">Phase 2<br><span style="font-size:0.6rem;opacity:0.7">3-4 weeks</span></div>
+    <div class="roadmap-content">
+      <h4>Data Transformer + Runner MVP / 数据转换器 + 执行器 MVP</h4>
+      <p>Build the "standardized materials" converter (tar.gz &rarr; algorithm input format). Build a simple benchmark runner that calls the algorithm API, captures output, and stores results. Start with a single algorithm, a single comparison metric.</p>
+    </div>
+  </div>
+  <div class="roadmap-item">
+    <div class="roadmap-phase rp-later">Phase 3<br><span style="font-size:0.6rem;opacity:0.7">2-3 weeks</span></div>
+    <div class="roadmap-content">
+      <h4>Comparison Engine + Reports / 比对引擎 + 报告</h4>
+      <p>Automated ground truth comparison with configurable metrics. Version-over-version regression reports. Dashboard showing algorithm performance trends. This is where the real business value starts flowing.</p>
+    </div>
+  </div>
+  <div class="roadmap-item">
+    <div class="roadmap-phase rp-later">Phase 4<br><span style="font-size:0.6rem;opacity:0.7">future</span></div>
+    <div class="roadmap-content">
+      <h4>Training Pipeline + Active Learning / 训练管线 + 主动学习</h4>
+      <p>Curate corner cases into training datasets. Feed back into model training. Active learning: model identifies its own weak spots, requests more data from the field. This closes the full loop from the original architecture vision.</p>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Cactus-Box Strategic Roadmap &mdash; Generated 2026-03-10 &mdash; For internal planning use
+</footer>
+
+</body>
+</html>

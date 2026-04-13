@@ -147,8 +147,47 @@ if ! echo "$DAG_LIST_OUTPUT" | grep -q "$DAG_ID"; then
 fi
 echo -e "${GREEN}✓ DAG '${DAG_ID}' 已注册${NC}"
 
+# -------- 数据预检查：确认主表有数据 --------
+echo -e "${YELLOW}[4/5]${NC} 检查目标日期范围内的源数据是否就绪..."
+
+DATA_CHECK_FAILED=0
+CURRENT="$START_DATE"
+while [[ "$CURRENT" < "$END_DATE" ]]; do
+    ROW_COUNT=$($COMPOSE exec -T "$AIRFLOW_SERVICE" python3 -c "
+from airflow.providers.mysql.hooks.mysql import MySqlHook
+try:
+    hook = MySqlHook(mysql_conn_id='datalog_mysql_conn')
+    result = hook.get_first(\"SELECT COUNT(*) FROM cycle_section_summary WHERE DATE(shift_date) = '${CURRENT}'\")
+    print(result[0] if result else 0)
+except Exception as e:
+    print(f'ERROR:{e}')
+" 2>/dev/null)
+
+    ROW_COUNT=$(echo "$ROW_COUNT" | tr -d '[:space:]')
+
+    if echo "$ROW_COUNT" | grep -q "^ERROR:"; then
+        echo -e "${RED}  ❌ ${CURRENT}: 数据库查询失败 - ${ROW_COUNT#ERROR:}${NC}"
+        DATA_CHECK_FAILED=1
+    elif [[ "$ROW_COUNT" == "0" ]]; then
+        echo -e "${RED}  ❌ ${CURRENT}: cycle_section_summary 无数据（0 行）${NC}"
+        DATA_CHECK_FAILED=1
+    else
+        echo -e "${GREEN}  ✓ ${CURRENT}: ${ROW_COUNT} 行数据就绪${NC}"
+    fi
+
+    CURRENT=$(date -d "$CURRENT + 1 day" +%Y-%m-%d)
+done
+
+if [ $DATA_CHECK_FAILED -ne 0 ]; then
+    echo ""
+    echo -e "${RED}❌ 部分日期无源数据，终止重跑。${NC}"
+    echo -e "${YELLOW}提示：主表无数据时强行重跑会导致类型推断错误。请确认数据已入库后再执行。${NC}"
+    exit 1
+fi
+echo ""
+
 # -------- 检查是否存在已有的 DagRun --------
-echo -e "${YELLOW}[4/4]${NC} 检查目标日期的 DagRun 状态..."
+echo -e "${YELLOW}[5/5]${NC} 检查目标日期的 DagRun 状态..."
 echo ""
 
 LIST_RUNS_OUTPUT=$($COMPOSE exec -T "$AIRFLOW_SERVICE" \

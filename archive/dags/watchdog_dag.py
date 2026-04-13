@@ -16,8 +16,8 @@ DAG_ID = "watchdog_dag"
 SCHEDULE = "0 8,20 * * *"  # 每天早晚 8:00 和 20:00 执行
 
 # 变量名称 (Variable Names)
-VAR_NGEN_ID = "watermark_cnt_cycles_ngen_id"
-# VAR_CACTUS_TIME = "watermark_cnt_cycles_cactus_time"  # 已废弃：历史水位线变量，保留注释避免误用
+VAR_NGEN_ID = "watermark_cnt_cycles_check_ngen_id"
+# VAR_CACTUS_TIME = "watermark_cnt_cycles_check_cactus_time"  # 已废弃：历史水位线变量，保留注释避免误用
 # 新变量：统一使用 last_modified 水位线（必须配置）
 VAR_CACTUS_TIME_NEW = "watermark_cactus_last_modified"
 
@@ -28,7 +28,7 @@ THRESHOLD_CACTUS_HOURS = 12 # Cactus (T+0) 容忍 12小时
 # 数据库连接配置 (Database Configuration)
 CONN_CACTUS = "cactus_mysql_conn"
 CONN_NGEN = "ngen_mysql_conn"
-TABLE_CACTUS = "kpi_data_db.cnt_cycles"
+TABLE_CACTUS = "bidata.cnt_cycles_check"
 TABLE_NGEN = "hutchisonports.ngen"
 TARGET_DAG_ID = "scanner_universal"
 

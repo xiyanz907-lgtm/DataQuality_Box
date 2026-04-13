@@ -150,7 +150,7 @@ class Cycle:
 **实现情况：** 部分实现（独立子系统）。
 
 这个能力存在于 `reconciliation_runner.py` 和 `scanner_cactus_monitor.py` 组成的**回填子系统**中，而非主治理流水线。它的逻辑是：
-- Scanner 检测 Cactus (`cnt_cycles`) 的变更
+- Scanner 检测 Cactus (`cnt_cycles_check`) 的变更
 - Worker 从 nGen 拉取数据，与 Cactus 做两级匹配（严格5分钟 + 宽松3小时+箱号）
 - **回写数据库**：将匹配到的 `cycleId` 和 `sync_status` 更新回 Cactus 表
 
@@ -163,8 +163,8 @@ class Cycle:
 
 ```397:406:plugins/services/reconciliation_runner.py
             join_update_sql = """
-                UPDATE cnt_cycles t
-                INNER JOIN tmp_cnt_cycles_updates s ON t.id = s.id
+                UPDATE cnt_cycles_check t
+                INNER JOIN tmp_cnt_cycles_check_updates s ON t.id = s.id
                 SET 
                     t.cycleId = s.cycleId,
                     -- [注释] 箱号覆盖逻辑已禁用，但报告中仍保留箱号 mismatch 对比记录
@@ -292,8 +292,8 @@ class Cycle:
 
 ```python
             join_update_sql = """
-                UPDATE cnt_cycles t
-                INNER JOIN tmp_cnt_cycles_updates s ON t.id = s.id
+                UPDATE cnt_cycles_check t
+                INNER JOIN tmp_cnt_cycles_check_updates s ON t.id = s.id
                 SET 
                     t.cycleId = s.cycleId,
                     -- [注释] 箱号覆盖逻辑已禁用，但报告中仍保留箱号 mismatch 对比记录

@@ -118,7 +118,7 @@ class ReconciliationRunner:
             # --- Step 5a: Insert orphaned nGen records ---
             inserted_count = 0
             if df_orphaned.height > 0:
-                self.logger.info(f"Step 5a: Inserting {df_orphaned.height} orphaned nGen records into cnt_cycles...")
+                self.logger.info(f"Step 5a: Inserting {df_orphaned.height} orphaned nGen records into cnt_cycles_check...")
                 inserted_count = self._perform_inserts(df_orphaned, df_ngen_agg)
 
             # --- Step 6: Metrics & Reporting (In-Memory) ---
@@ -272,7 +272,7 @@ class ReconciliationRunner:
                 cnt01,
                 cnt02,
                 cnt03
-            FROM cnt_cycles
+            FROM cnt_cycles_check
             WHERE vehicleId IN ({vehicles_str})
             AND _time >= '{start_dt.strftime('%Y-%m-%d %H:%M:%S')}'
             AND _time <= '{end_dt.strftime('%Y-%m-%d %H:%M:%S')}.999999'
@@ -365,17 +365,17 @@ class ReconciliationRunner:
             # 使用 TEMPORARY 关键字，会话结束自动删除，且不产生 binlog (取决于配置)
             # 这里的 LIMIT 0 只是为了复制列结构和类型
             create_temp_sql = """
-            CREATE TEMPORARY TABLE IF NOT EXISTS tmp_cnt_cycles_updates 
-            AS SELECT id, cycleId, cnt01, cnt02, cnt03, sync_status FROM cnt_cycles LIMIT 0;
+            CREATE TEMPORARY TABLE IF NOT EXISTS tmp_cnt_cycles_check_updates 
+            AS SELECT id, cycleId, cnt01, cnt02, cnt03, sync_status FROM cnt_cycles_check LIMIT 0;
             """
             cursor.execute(create_temp_sql)
             
             # 确保临时表是空的 (如果是连接池复用可能残留)
-            cursor.execute("TRUNCATE TABLE tmp_cnt_cycles_updates")
+            cursor.execute("TRUNCATE TABLE tmp_cnt_cycles_check_updates")
             
             # 2. 批量插入数据到临时表 (Batch Insert is FAST)
             insert_temp_sql = """
-                INSERT INTO tmp_cnt_cycles_updates (id, cycleId, cnt01, cnt02, cnt03, sync_status)
+                INSERT INTO tmp_cnt_cycles_check_updates (id, cycleId, cnt01, cnt02, cnt03, sync_status)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """
             
@@ -390,15 +390,15 @@ class ReconciliationRunner:
             # [关键优化] 给临时表添加索引，防止 UPDATE JOIN 触发全表扫描导致 CPU 100%
             # CREATE TEMPORARY TABLE AS SELECT 不会复制索引，必须手动添加
             self.logger.info("Indexing temporary table...")
-            cursor.execute("CREATE INDEX idx_tmp_id ON tmp_cnt_cycles_updates(id)")
+            cursor.execute("CREATE INDEX idx_tmp_id ON tmp_cnt_cycles_check_updates(id)")
                 
             # 3. 执行 Join Update
             # 利用主键/索引进行关联更新，效率极高
             # 注意：如果 sync_status=2，cycleId/cnt 字段为 NULL，MySQL UPDATE SET x=NULL 是合法的。
             # [修改] 注释掉箱号覆盖逻辑，但保留 mismatch 对比记录用于 DQ 报告
             join_update_sql = """
-                UPDATE cnt_cycles t
-                INNER JOIN tmp_cnt_cycles_updates s ON t.id = s.id
+                UPDATE cnt_cycles_check t
+                INNER JOIN tmp_cnt_cycles_check_updates s ON t.id = s.id
                 SET 
                     t.cycleId = s.cycleId,
                     -- [注释] 箱号覆盖逻辑已禁用，但报告中仍保留箱号 mismatch 对比记录
@@ -414,7 +414,7 @@ class ReconciliationRunner:
             self.logger.info(f"Bulk Update completed. Affected rows: {affected_rows}")
             
             # 4. 清理 (可选，Connection 关闭也会自动清理)
-            cursor.execute("DROP TEMPORARY TABLE IF EXISTS tmp_cnt_cycles_updates")
+            cursor.execute("DROP TEMPORARY TABLE IF EXISTS tmp_cnt_cycles_check_updates")
             cursor.close()
             
         except Exception as e:
@@ -500,12 +500,12 @@ class ReconciliationRunner:
 
     def _perform_inserts(self, df_orphaned: pl.DataFrame, df_all_ngen: pl.DataFrame) -> int:
         """
-        将 orphaned nGen 记录插入到 cnt_cycles 表，补全 Cactus 数据完整性。
+        将 orphaned nGen 记录插入到 cnt_cycles_check 表，补全 Cactus 数据完整性。
 
         流程:
         1. 调用 _compute_time_begin 计算 _time_begin (含时间修正)
         2. 构造 INSERT 字段 (vehicleId, cycleId, _time_begin, _time, _time_end, cnt01-03, sync_status=3)
-        3. 去重: 查询 cnt_cycles 中已存在的 cycleId，排除重复
+        3. 去重: 查询 cnt_cycles_check 中已存在的 cycleId，排除重复
         4. 批量 INSERT
         """
         if df_orphaned.is_empty():
@@ -583,7 +583,7 @@ class ReconciliationRunner:
             self.logger.warning("No valid insert params after conversion.")
             return 0
 
-        # Step 3: 去重 — 查询 cnt_cycles 中已存在的 cycleId
+        # Step 3: 去重 — 查询 cnt_cycles_check 中已存在的 cycleId
         hook = MySqlHook(mysql_conn_id=self.cactus_conn_id)
         cycle_ids = list({str(p[1]) for p in insert_params})
         cycle_ids_str = ",".join(cycle_ids)
@@ -591,7 +591,7 @@ class ReconciliationRunner:
         conn = hook.get_conn()
         try:
             cursor = conn.cursor()
-            existing_sql = f"SELECT DISTINCT cycleId FROM cnt_cycles WHERE cycleId IN ({cycle_ids_str})"
+            existing_sql = f"SELECT DISTINCT cycleId FROM cnt_cycles_check WHERE cycleId IN ({cycle_ids_str})"
             cursor.execute(existing_sql)
             existing_cycle_ids = {str(r[0]) for r in cursor.fetchall()}
 
@@ -601,13 +601,13 @@ class ReconciliationRunner:
                 self.logger.info(f"Dedup: {before_count} -> {len(insert_params)} (excluded {before_count - len(insert_params)} existing cycleIds)")
 
             if not insert_params:
-                self.logger.info("All orphaned records already exist in cnt_cycles. Nothing to insert.")
+                self.logger.info("All orphaned records already exist in cnt_cycles_check. Nothing to insert.")
                 cursor.close()
                 return 0
 
             # Step 4: 批量 INSERT
             insert_sql = """
-                INSERT INTO cnt_cycles (vehicleId, cycleId, _time_begin, _time, _time_end, cnt01, cnt02, cnt03, sync_status)
+                INSERT INTO cnt_cycles_check (vehicleId, cycleId, _time_begin, _time, _time_end, cnt01, cnt02, cnt03, sync_status)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
@@ -619,7 +619,7 @@ class ReconciliationRunner:
                 conn.commit()
                 total_inserted += len(batch)
 
-            self.logger.info(f"Inserted {total_inserted} synthetic records into cnt_cycles (sync_status=3)")
+            self.logger.info(f"Inserted {total_inserted} synthetic records into cnt_cycles_check (sync_status=3)")
             cursor.close()
 
         except Exception as e:

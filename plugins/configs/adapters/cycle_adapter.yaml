@@ -206,26 +206,26 @@ fields:
   - target: "idle_time"
     source_expr: "col('idle_time')"
   
-  # 4. 差值字段
+  # 4. 差值字段（显式 cast 防止 string vs numeric 类型不匹配）
   - target: "diff_box_count_ngen"
-    source_expr: "col('box') - col('box_ngen')"
+    source_expr: "col('box').cast(pl.Float64, strict=False) - col('box_ngen').cast(pl.Float64, strict=False)"
   
   - target: "diff_box_count1"
-    source_expr: "col('box') - col('box_subtarget')"
+    source_expr: "col('box').cast(pl.Float64, strict=False) - col('box_subtarget').cast(pl.Float64, strict=False)"
   
   - target: "diff_box_count2"
-    source_expr: "col('box') - col('box_summary')"
+    source_expr: "col('box').cast(pl.Float64, strict=False) - col('box_summary').cast(pl.Float64, strict=False)"
   
   - target: "diff_mileage"
-    source_expr: "col('mileage') - col('mileage_summary')"
+    source_expr: "col('mileage').cast(pl.Float64, strict=False) - col('mileage_summary').cast(pl.Float64, strict=False)"
 
 
   # 5. 组级聚合字段
   - target: "daily_total_box"
-    source_expr: "col('box').sum().over('shift_date')"
+    source_expr: "col('box').cast(pl.Float64, strict=False).sum().over('shift_date')"
 
   - target: "daily_total_mileage"
-    source_expr: "col('mileage').sum().over('shift_date')"
+    source_expr: "col('mileage').cast(pl.Float64, strict=False).sum().over('shift_date')"
 
   - target: "daily_total_mileage_all"
     source_expr: "col('mileage_all').sum().over('shift_date')"

@@ -34,14 +34,14 @@ if [ "$CLEAN_DATA" = true ]; then
 
     # 删除logs目录（在父目录）
     if [ -d "../logs" ]; then
-        sudo rm -rf ../logs
+        rm -rf ../logs 2>/dev/null || echo "⚠ 部分日志文件删除失败（权限不足），请手动清理"
         mkdir -p ../logs
         echo "✓ 日志已清除"
     fi
 
     # 删除postgres数据（bind mount 在 deploy 目录）
     if [ -d "./pg_data" ]; then
-        sudo rm -rf ./pg_data
+        rm -rf ./pg_data 2>/dev/null || echo "⚠ 部分数据库文件删除失败（权限不足），请手动清理"
         mkdir -p ./pg_data
         echo "✓ 数据库数据已清除"
     fi

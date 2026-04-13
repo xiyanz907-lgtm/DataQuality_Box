@@ -25,7 +25,7 @@ default_args = {
 with DAG(
     'scanner_cactus_monitor',
     default_args=default_args,
-    description='Monitor Cactus (cnt_cycles) changes and trigger reconciliation for unmatched data',
+    description='Monitor Cactus (cnt_cycles_check) changes and trigger reconciliation for unmatched data',
     schedule='@hourly',
     start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
     catchup=False,
@@ -35,7 +35,7 @@ with DAG(
 
     def check_changes_and_branch(**context):
         """
-        检查 Cactus (cnt_cycles) 表是否有新数据或更新。
+        检查 Cactus (cnt_cycles_check) 表是否有新数据或更新。
         条件: 
         1. last_modified > Watermark
         2. sync_status != 1 (及 4)
@@ -57,13 +57,13 @@ with DAG(
         
         # 查询全局 Max last_modified
         # 假设 last_modified 是 TIMESTAMP 或 DATETIME 类型
-        check_max_sql = "SELECT MAX(last_modified_timestamp) FROM cnt_cycles"
+        check_max_sql = "SELECT MAX(last_modified_timestamp) FROM cnt_cycles_check"
         
         max_ts_df = hook.get_pandas_df(check_max_sql)
         current_max_ts = max_ts_df.iloc[0, 0]
         
         if not current_max_ts:
-            logger.info("No data found in cnt_cycles table.")
+            logger.info("No data found in cnt_cycles_check table.")
             return 'skip_processing'
 
         # 转换为 datetime 对象
@@ -103,7 +103,7 @@ with DAG(
         
         vehicles_sql = f"""
             SELECT DISTINCT vehicleId 
-            FROM cnt_cycles 
+            FROM cnt_cycles_check 
             WHERE last_modified_timestamp > '{last_watermark_str}' 
             AND last_modified_timestamp <= '{target_watermark_str}'
             AND (sync_status IS NULL OR sync_status NOT IN (1, 3, 4))
@@ -114,7 +114,7 @@ with DAG(
         # 增加 WHERE _time IS NOT NULL 且不为空字符串的过滤
         range_sql = f"""
             SELECT MIN(_time) as min_t, MAX(_time) as max_t
-            FROM cnt_cycles 
+            FROM cnt_cycles_check 
             WHERE last_modified_timestamp > '{last_watermark_str}'
             AND last_modified_timestamp <= '{target_watermark_str}'
             AND _time IS NOT NULL AND _time != ''

@@ -15,7 +15,7 @@ CONN_ID_DATALOG = "datalog_mysql_conn"
 CONN_ID_QA = "qa_mysql_conn"
 # 表级配置中心（可按需扩展新表）
 TABLE_CONFIGS = {
-    "cnt_cycles": {
+    "cnt_cycles_check": {
         "need_reference": True,
         "reference_source": "ngen",
         "reference_table": "ngen",
@@ -30,10 +30,10 @@ TABLE_CONFIGS = {
         "select_sql_template": (
             "SELECT cycleId, _time_begin, _time_end, "
             "TIMESTAMPDIFF(SECOND, _time_begin, _time_end) AS duration_sec "
-            "FROM kpi_data_db.{table_name} "
+            "FROM bidata.{table_name} "
             "WHERE DATE({date_col}) = '{{date_filter}}'{{limit_clause}}"
         ),
-        "sql_limit": os.getenv("CNT_CYCLES_SQL_LIMIT"),  # 可选限制行数
+        "sql_limit": os.getenv("cnt_cycles_check_SQL_LIMIT"),  # 可选限制行数
         # 动态窗口缓冲时间（小时），覆盖时区差异/时钟偏差，默认 3 小时
         "time_window_buffer_hours": int(os.getenv("TIME_WINDOW_BUFFER_HOURS", 3)),
     },

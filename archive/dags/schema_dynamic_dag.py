@@ -16,7 +16,7 @@ if plugins_dir not in sys.path:
 # ======================================================
 # 1. 导入 Schema 
 # ======================================================
-from schemas.kpi.cnt_cycles import CntCyclesSchema
+from schemas.kpi.cnt_cycles_check import CntCyclesSchema
 from schemas.kpi.cnt_newcycles import CntNewCyclesSchema
 from services.data_validator import run_pandera_validation
 
@@ -25,15 +25,15 @@ from services.data_validator import run_pandera_validation
 # ======================================================
 TABLES_TO_CHECK = [
     {
-        "table_name": "kpi_data_db.cnt_cycles",   
+        "table_name": "bidata.cnt_cycles_check",   
         "schema_obj": CntCyclesSchema,            
-        "task_id": "cnt_cycles",                  
+        "task_id": "cnt_cycles_check",                  
         "batch_size": int(os.getenv("BATCH_SIZE", 50000))
     },
     {
-        "table_name": "kpi_data_db.cnt_newcycles",
+        "table_name": "bidata.cnt_newcycles",
         "schema_obj": CntNewCyclesSchema,
-        "task_id": "new_cnt_cycles",
+        "task_id": "new_cnt_cycles_check",
         "batch_size": int(os.getenv("BATCH_SIZE", 50000))
     }
 ]
