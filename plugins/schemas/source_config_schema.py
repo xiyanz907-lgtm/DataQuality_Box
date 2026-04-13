@@ -7,15 +7,6 @@ from pydantic import BaseModel, Field, validator
 from datetime import timedelta
 
 
-class SensorTimeoutAlertConfig(BaseModel):
-    """Sensor 超时后的自定义告警配置"""
-    enabled: bool = True
-    check_conn_id: str = Field(..., description="要查询的数据库连接 ID")
-    check_table: str = Field(..., description="要查询的表名")
-    check_timestamp_field: str = Field(..., description="时间戳字段名")
-    no_update_cc_env: Optional[str] = Field(None, description="当天无更新时抄送的环境变量名 (如 SITE_MANAGER_EMAIL)")
-
-
 class SensorConfig(BaseModel):
     """Sensor 配置"""
     enabled: bool = True
@@ -23,8 +14,7 @@ class SensorConfig(BaseModel):
     timeout: int = Field(default=3600, description="Sensor超时时间(秒)")
     poke_interval: int = Field(default=60, description="轮询间隔(秒)")
     mode: Literal['poke', 'reschedule'] = 'reschedule'
-    timeout_alert: Optional[SensorTimeoutAlertConfig] = Field(None, description="Sensor 超时告警配置")
-
+    
     # 条件可选参数
     sql: Optional[str] = Field(None, description="SQL查询语句 (type=SQL时必填)")
     conn_id: Optional[str] = Field(None, description="数据库连接ID (type=SQL时必填)")

@@ -29,16 +29,15 @@ services:
   # Airflow
   airflow:
     image: airflow-custom:2.10.4  # 使用预构建的镜像，不再 build
-    network_mode: host  # 使用宿主机网络，解决容器无法访问外网（SMTP等）的问题
     command: bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_ADMIN_USER} --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL} --password ${AIRFLOW_ADMIN_PASSWORD} 2>/dev/null || true && (airflow scheduler & airflow webserver)"
     environment:
       - TZ=${SITE_TIMEZONE}  #挂载宿主机时间
       - PYTHONPATH=/opt/airflow  # 添加 plugins 模块路径
       - LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6  # 修复 MySQL-Python TLS 问题
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      # host 模式下通过 localhost 连接同机 PostgreSQL
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+      # Airflow 2.x 兼容：优先使用 [database].sql_alchemy_conn；保留旧 key 避免环境里存在旧版本
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
 
             #  【注入管理员账号变量】
@@ -53,7 +52,6 @@ services:
       - SITE_TIMEZONE=${SITE_TIMEZONE}
       - ALERT_EMAIL_TO=${ALERT_EMAIL_TO}
       - RECON_EMAIL_TO=${RECON_EMAIL_TO}
-      - SITE_MANAGER_EMAIL=${SITE_MANAGER_EMAIL}
       - THRESHOLD_TIME_DIFF=${THRESHOLD_TIME_DIFF}
       - BATCH_SIZE=${BATCH_SIZE}
 
@@ -128,9 +126,10 @@ services:
       - ../incoming_files:/opt/airflow/incoming_files
       - ../data:/opt/airflow/data
       - ../config:/opt/airflow/config
-      # Mount data directory for Parquet storage (使用相对路径，部署时自动适配)
-      - ../data:/data
-    # network_mode: host 时不需要 ports 映射，Airflow 直接监听宿主机 8080 端口
+      # Mount data directory for Parquet storage
+      - /home/ubuntu/cactus_box/data:/data
+    ports:
+      - "8081:8080" 
     depends_on:
       postgres_airflow:
         condition: service_healthy
