@@ -45,11 +45,32 @@ if ! docker images ${IMAGE_NAME} --format "{{.Repository}}:{{.Tag}}" | grep -q "
 fi
 echo -e "${GREEN}✓ 镜像 ${IMAGE_NAME} 已存在${NC}"
 
-# 检查.env文件
+# 加载站点配置
 echo -e "${YELLOW}[3/6]${NC} 检查配置文件..."
-if [ ! -f .env ]; then
+SITE=${1:-}
+if [ -n "$SITE" ]; then
+    TEMPLATE="env_${SITE}.template"
+    if [ ! -f "$TEMPLATE" ]; then
+        echo -e "${RED}❌ 站点配置 ${TEMPLATE} 不存在${NC}"
+        echo "可用的站点配置:"
+        ls env_*.template 2>/dev/null || echo "  （无）"
+        echo ""
+        echo "请参考 env.template 创建: cp env.template env_${SITE}.template"
+        exit 1
+    fi
+    cp "$TEMPLATE" .env
+    echo -e "${GREEN}✓ 已加载站点配置: ${TEMPLATE} → .env${NC}"
+elif [ ! -f .env ]; then
     echo -e "${RED}❌ .env文件不存在${NC}"
-    echo "请创建.env文件并配置必要的环境变量"
+    echo ""
+    echo "用法:"
+    echo "  bash deploy.sh <站点名>    从 env_<站点名>.template 加载配置"
+    echo "  bash deploy.sh             使用已有的 .env 文件"
+    echo ""
+    echo "可用的站点配置:"
+    ls env_*.template 2>/dev/null || echo "  （无）"
+    echo ""
+    echo "首次部署请参考 env.template 创建站点配置文件"
     exit 1
 fi
 
