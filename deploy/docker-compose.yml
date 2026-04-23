@@ -29,6 +29,7 @@ services:
   # Airflow
   airflow:
     image: airflow-custom:2.10.4  # 使用预构建的镜像，不再 build
+    network_mode: host
     command: bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_ADMIN_USER} --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL} --password ${AIRFLOW_ADMIN_PASSWORD} 2>/dev/null || true && (airflow scheduler & airflow webserver)"
     environment:
       - TZ=${SITE_TIMEZONE}  #挂载宿主机时间
@@ -36,8 +37,8 @@ services:
       - LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6  # 修复 MySQL-Python TLS 问题
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       # Airflow 2.x 兼容：优先使用 [database].sql_alchemy_conn；保留旧 key 避免环境里存在旧版本
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
-      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres_airflow:5432/airflow
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@localhost:5432/airflow
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
 
             #  【注入管理员账号变量】
@@ -131,8 +132,6 @@ services:
       - ../config:/opt/airflow/config
       # Mount data directory for Parquet storage
       - /home/ubuntu/cactus_box/data:/data
-    ports:
-      - "8081:8080" 
     depends_on:
       postgres_airflow:
         condition: service_healthy
